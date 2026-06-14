@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }} · Telegram 预警机器人</title>
+  <link rel="stylesheet" href="/static/styles.css?v=20260613-compact">
+</head>
+<body class="mini-panel-body">
+  <main class="mini-shell">
+    <header class="mini-panel-header">
+      <div>
+        <span class="mini-kicker">Telegram 预警机器人</span>
+        <h1>{% block page_title %}{{ title }}{% endblock %}</h1>
+      </div>
+      {% block header_action %}{% endblock %}
+    </header>
+
+    {% block content %}{% endblock %}
+  </main>
+
+  <nav class="mini-bottom-tabs" aria-label="预警面板导航">
+    <a class="mini-tab {% if active_tab == 'tasks' %}active{% endif %}" href="/mini/tasks">任务</a>
+    <a class="mini-tab {% if active_tab == 'keywords' %}active{% endif %}" href="/mini/keywords">关键词</a>
+    <a class="mini-tab {% if active_tab == 'stats' %}active{% endif %}" href="/mini/stats">统计</a>
+    <a class="mini-tab {% if active_tab == 'history' %}active{% endif %}" href="/mini/history">历史</a>
+  </nav>
+  <script src="/static/miniapp.js"></script>
+</body>
+</html>

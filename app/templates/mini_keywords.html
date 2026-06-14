@@ -1,0 +1,53 @@
+{% extends "mini_shell.html" %}
+
+{% block page_title %}关键词{% endblock %}
+
+{% block header_action %}
+<button class="mini-primary-button" type="submit" form="keyword-form">保存</button>
+{% endblock %}
+
+{% block content %}
+<form id="keyword-form" class="mini-form-panel" method="post" action="/mini/keywords">
+  <div class="mini-card-list">
+    {% for keyword in keywords %}
+    <label class="mini-keyword-card">
+      <span class="mini-keyword-main">
+        <input
+          class="wait-keyword-checkbox"
+          type="checkbox"
+          name="enabled::{{ keyword.text }}"
+          value="1"
+          aria-label="启用 {{ keyword.text }}"
+          {% if keyword.enabled %}checked{% endif %}
+        >
+        <span>
+          <strong>{{ keyword.text }}</strong>
+          <em>命中 {{ keyword.hit_count }} · 识别</em>
+        </span>
+      </span>
+      <label class="mini-inline-toggle">
+        <input
+          class="wait-keyword-checkbox"
+          type="checkbox"
+          name="alert_enabled::{{ keyword.text }}"
+          value="1"
+          aria-label="预警 {{ keyword.text }}"
+          {% if keyword.alert_enabled %}checked{% endif %}
+        >
+        <span>超时预警</span>
+      </label>
+      <input
+        class="mini-text-input"
+        type="text"
+        inputmode="text"
+        autocomplete="off"
+        name="chat_ids::{{ keyword.text }}"
+        value="{{ keyword.recipient_chat_ids }}"
+        placeholder="接收预警 Chat ID，例如 123456789, -100123"
+        aria-label="{{ keyword.text }} 接收预警 Chat ID"
+      >
+    </label>
+    {% endfor %}
+  </div>
+</form>
+{% endblock %}

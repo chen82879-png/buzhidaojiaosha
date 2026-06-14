@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>固定关键词</h1>
+
+<section class="metric-grid" aria-label="固定关键词状态">
+  <article class="card">
+    <div class="muted">固定关键词</div>
+    <div class="metric-value">{{ keywords|length }}</div>
+  </article>
+  <article class="card">
+    <div class="muted">已配置监控群</div>
+    <div class="metric-value">{{ enabled_chat_count }}</div>
+  </article>
+  <article class="card">
+    <div class="muted">监测预警状态</div>
+    <div class="metric-value {% if enabled_chat_count > 0 %}status-success{% else %}status-warning{% endif %}">
+      {% if enabled_chat_count > 0 %}已启用{% else %}未启用{% endif %}
+    </div>
+  </article>
+  <article class="card">
+    <div class="muted">启用条件</div>
+    <div style="margin-top:8px">配置 chat id 后自动生效</div>
+  </article>
+</section>
+
+<section class="card" style="margin-top:16px">
+  <h2>关键词清单</h2>
+  <div class="keyword-grid">
+    {% for keyword in keywords %}
+    <div class="keyword-row">
+      <span class="chip">{{ keyword.text }}</span>
+      <span class="muted">命中 {{ keyword.hit_count }} 次</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card" style="margin-top:16px">
+  <h2>当前启用监测的 chat id</h2>
+  {% if enabled_chats %}
+  <table style="width:100%;border-collapse:collapse">
+    <thead><tr><th align="left">群组</th><th align="left">chat id</th></tr></thead>
+    <tbody>
+      {% for chat in enabled_chats %}
+      <tr><td>{{ chat.chat_name }}</td><td class="muted">{{ chat.chat_id }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">未配置 chat id，固定关键词不会触发监测预警。</p>
+  {% endif %}
+</section>
+{% endblock %}

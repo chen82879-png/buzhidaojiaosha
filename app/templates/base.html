@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <nav class="sidebar" aria-label="主导航">
+      <div class="brand">Telegram Alert Bot</div>
+      <a class="nav-link" href="/admin">统计总览</a>
+      <a class="nav-link" href="/mini/keywords">固定关键词</a>
+      <a class="nav-link" href="/admin/rules">监控规则配置</a>
+      <a class="nav-link" href="/admin/alerts">预警记录</a>
+    </nav>
+    <main class="main">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  <script src="/static/admin.js"></script>
+</body>
+</html>

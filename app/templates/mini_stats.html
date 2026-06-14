@@ -1,0 +1,84 @@
+{% extends "mini_shell.html" %}
+
+{% block page_title %}统计{% endblock %}
+
+{% block header_action %}
+<span class="mini-pill">{{ stats.open_task_count }} 个待处理</span>
+{% endblock %}
+
+{% block content %}
+<section class="mini-metric-grid" aria-label="预警统计">
+  <div class="mini-metric-card">
+    <span>今日命中</span>
+    <strong>{{ stats.today_count }}</strong>
+  </div>
+  <div class="mini-metric-card">
+    <span>7 日命中</span>
+    <strong>{{ stats.seven_day_count }}</strong>
+  </div>
+  <div class="mini-metric-card">
+    <span>待处理任务</span>
+    <strong>{{ stats.open_task_count }}</strong>
+  </div>
+  <div class="mini-metric-card">
+    <span>启用关键词</span>
+    <strong>{{ stats.enabled_count }}</strong>
+  </div>
+</section>
+
+<section class="mini-section">
+  <h2>历史检测</h2>
+  <a class="mini-link-card" href="/mini/history">
+    <strong>打开历史检测</strong>
+    <span>稍等闭环、超时、删除、重复、跟进、漏回、自回集中在这里查看。</span>
+  </a>
+</section>
+
+<section class="mini-section">
+  <h2>关键词排行</h2>
+  <div class="mini-card-list">
+    {% for keyword in stats.keywords %}
+    <article class="mini-stats-card">
+      <div class="mini-card-head">
+        <strong>{{ keyword.keyword }}</strong>
+        <span>{% if keyword.enabled %}启用{% else %}关闭{% endif %}</span>
+      </div>
+      <div class="mini-stats-numbers">
+        <div><span>今日</span><strong>{{ keyword.today_count }}</strong></div>
+        <div><span>7 日</span><strong>{{ keyword.seven_day_count }}</strong></div>
+        <div><span>累计</span><strong>{{ keyword.total_count }}</strong></div>
+      </div>
+      {% if keyword.latest_chat_name %}
+      <p class="mini-card-meta">最近：{{ keyword.latest_chat_name }} · {{ keyword.latest_label }}</p>
+      {% endif %}
+    </article>
+    {% else %}
+    <div class="mini-empty-state">
+      <strong>暂无关键词统计</strong>
+      <span>关键词命中后会生成统计。</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="mini-section">
+  <h2>最近审计</h2>
+  <div class="mini-card-list">
+    {% for record in stats.audit_records %}
+    <article class="mini-audit-card">
+      <strong>{{ record.matched_keyword }}</strong>
+      <p class="mini-card-meta">{{ record.chat_name }} · {{ record.created_at }}</p>
+      <p class="mini-card-text">{{ record.message_excerpt }}</p>
+      {% if record.message_url %}
+      <a class="mini-text-link" href="{{ record.message_url }}">查看消息</a>
+      {% endif %}
+    </article>
+    {% else %}
+    <div class="mini-empty-state">
+      <strong>暂无审计记录</strong>
+      <span>命中记录会保存在这里。</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

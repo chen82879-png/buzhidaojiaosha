@@ -1,0 +1,134 @@
+{% extends "mini_shell.html" %}
+
+{% block page_title %}任务{% endblock %}
+
+{% block header_action %}
+<span class="mini-pill">{{ task_count }} 个待处理</span>
+{% endblock %}
+
+{% block content %}
+<section class="mini-task-summary" aria-label="任务分类">
+  <div>
+    <span>稍等</span>
+    <strong>{{ task_groups.wait|length }}</strong>
+  </div>
+  <div>
+    <span>跟进</span>
+    <strong>{{ task_groups.followup|length }}</strong>
+  </div>
+  <div>
+    <span>漏回</span>
+    <strong>{{ task_groups.reply|length }}</strong>
+  </div>
+  <div>
+    <span>自回</span>
+    <strong>{{ task_groups.self_reply|length }}</strong>
+  </div>
+</section>
+
+<div id="task-live-region">
+<section class="mini-section">
+  <h2>稍等 {{ task_groups.wait|length }}</h2>
+  {% if task_groups.wait %}
+  <div class="mini-card-list">
+    {% for task in task_groups.wait %}
+    <article class="mini-task-card">
+      <div class="mini-card-head">
+        <strong>{{ task.keyword }}</strong>
+        <span class="mini-countdown" data-due="{{ task.due_timestamp }}">{{ task.remaining_label }}</span>
+      </div>
+      <p class="mini-card-meta">{{ task.chat_name }} · {{ task.due_label }}</p>
+      <p class="mini-card-text">{{ task.message_excerpt }}</p>
+      {% if task.message_url %}
+      <a class="mini-link-button" href="{{ task.message_url }}">查看原消息</a>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="mini-empty-state">
+    <strong>当前没有稍等任务</strong>
+    <span>客服发送稍等后，如果还没有下文，会出现在这里。</span>
+  </div>
+  {% endif %}
+</section>
+
+<section class="mini-section">
+  <h2>跟进 {{ task_groups.followup|length }}</h2>
+  {% if task_groups.followup %}
+  <div class="mini-card-list">
+    {% for task in task_groups.followup %}
+    <article class="mini-task-card followup">
+      <div class="mini-card-head">
+        <strong>{{ task.keyword }}</strong>
+        <span class="mini-countdown" data-due="{{ task.due_timestamp }}">{{ task.remaining_label }}</span>
+      </div>
+      <p class="mini-card-meta">{{ task.chat_name }} · {{ task.due_label }}</p>
+      <p class="mini-card-text">{{ task.message_excerpt }}</p>
+      {% if task.message_url %}
+      <a class="mini-link-button" href="{{ task.message_url }}">查看咨询</a>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="mini-empty-state">
+    <strong>当前没有跟进任务</strong>
+    <span>已完成稍等被客户再次引用咨询后，会进入这里。</span>
+  </div>
+  {% endif %}
+</section>
+
+<section class="mini-section">
+  <h2>漏回 {{ task_groups.reply|length }}</h2>
+  {% if task_groups.reply %}
+  <div class="mini-card-list">
+    {% for task in task_groups.reply %}
+    <article class="mini-task-card reply">
+      <div class="mini-card-head">
+        <strong>{{ task.keyword }}</strong>
+        <span class="mini-countdown" data-due="{{ task.due_timestamp }}">{{ task.remaining_label }}</span>
+      </div>
+      <p class="mini-card-meta">{{ task.chat_name }} · {{ task.due_label }}</p>
+      <p class="mini-card-text">{{ task.message_excerpt }}</p>
+      {% if task.message_url %}
+      <a class="mini-link-button" href="{{ task.message_url }}">查看客户消息</a>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="mini-empty-state">
+    <strong>当前没有漏回任务</strong>
+    <span>客户引用客服消息后，如果没有继续处理，会进入这里。</span>
+  </div>
+  {% endif %}
+</section>
+
+<section class="mini-section">
+  <h2>自回 {{ task_groups.self_reply|length }}</h2>
+  {% if task_groups.self_reply %}
+  <div class="mini-card-list">
+    {% for task in task_groups.self_reply %}
+    <article class="mini-task-card self-reply">
+      <div class="mini-card-head">
+        <strong>{{ task.keyword }}</strong>
+        <span class="mini-countdown" data-due="{{ task.due_timestamp }}">{{ task.remaining_label }}</span>
+      </div>
+      <p class="mini-card-meta">{{ task.chat_name }} · {{ task.due_label }}</p>
+      <p class="mini-card-text">{{ task.message_excerpt }}</p>
+      {% if task.message_url %}
+      <a class="mini-link-button" href="{{ task.message_url }}">查看追加消息</a>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="mini-empty-state">
+    <strong>当前没有自回任务</strong>
+    <span>客户在待处理链路中追加消息后，会进入这里。</span>
+  </div>
+  {% endif %}
+</section>
+</div>
+{% endblock %}

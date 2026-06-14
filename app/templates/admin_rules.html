@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>监控规则配置</h1>
+<section class="card">
+  <div class="rule-row">
+    <div><strong>Ops Group</strong><div class="muted">chat id: -1001571955528</div></div>
+    <div><span class="chip">充值</span><span class="chip">失败</span></div>
+    <div><span class="chip">YY_6/9_值班号3</span></div>
+    <button class="button">编辑</button>
+  </div>
+</section>
+<section class="card" style="margin-top:16px">
+  <h2>批量导入关键词</h2>
+  <textarea aria-label="批量导入关键词" rows="6" style="width:100%;background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:6px"></textarea>
+  <button class="button primary" style="margin-top:12px">解析预览</button>
+</section>
+{% endblock %}

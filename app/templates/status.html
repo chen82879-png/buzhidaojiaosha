@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="mini-keywords-body">
+  <main class="mini-body">
+    <header class="mini-page-header">
+      <h1>预警机器人状态</h1>
+      <span>{{ status.service }}</span>
+    </header>
+
+    <section class="mini-explain">
+      当前版本保留固定关键词配置、等待回复预警、关键词预警、审计 API 和 Telegram webhook。
+    </section>
+
+    <section class="metric-grid" aria-label="运行状态">
+      <article class="card">
+        <div class="muted">待处理等待任务</div>
+        <div class="metric-value">{{ status.open_task_count }}</div>
+      </article>
+      <article class="card">
+        <div class="muted">固定关键词配置</div>
+        <div class="metric-value">{{ status.keyword_count }}</div>
+      </article>
+      <article class="card">
+        <div class="muted">Webhook</div>
+        <div class="metric-value">{{ "已配置" if status.webhook_configured else "未配置" }}</div>
+      </article>
+      <article class="card">
+        <div class="muted">监听账号</div>
+        <div class="metric-value">{{ "已配置" if status.listener_configured else "未配置" }}</div>
+      </article>
+    </section>
+
+    <section class="mini-form-panel">
+      <div class="mini-action-row">
+        <a class="mini-action-button primary" href="/mini/keywords">固定关键词</a>
+        <a class="mini-action-button" href="/api/wait/pending">等待任务 API</a>
+        <a class="mini-action-button" href="/api/audit/recent">审计 API</a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

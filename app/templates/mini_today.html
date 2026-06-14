@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>任务</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="mini-keywords-body">
+  <main class="mini-body">
+    <header class="mini-page-header">
+      <h1>任务</h1>
+      <span>稍等 {{ wait_timeout_minutes }}M · 跟进 {{ followup_timeout_minutes }}M</span>
+    </header>
+
+    <section class="task-timeout-panel" aria-label="固定超时时间">
+      <div>
+        <span class="task-timeout-label">稍等超时</span>
+        <strong>{{ wait_timeout_minutes }} 分钟</strong>
+      </div>
+      <div>
+        <span class="task-timeout-label">跟进超时</span>
+        <strong>{{ followup_timeout_minutes }} 分钟</strong>
+      </div>
+    </section>
+
+    <section class="task-section">
+      <div class="task-section-head">
+        <h2>稍等</h2>
+        <span>{{ wait_tasks|length }}</span>
+      </div>
+      <div class="task-list">
+        {% for task in wait_tasks %}
+        <article class="task-card">
+          <div class="task-card-head">
+            <strong>{{ task.keyword }}</strong>
+            <span>{{ task.remaining_label }}</span>
+          </div>
+          <p class="task-group">{{ task.chat_name or task.chat_id }}</p>
+          <p class="task-excerpt">{{ task.message_excerpt }}</p>
+          <a class="task-link-button" href="{{ task.message_url }}" target="_blank" rel="noopener">打开原消息</a>
+        </article>
+        {% else %}
+        <div class="task-empty">暂无任务</div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="task-section">
+      <div class="task-section-head">
+        <h2>跟进</h2>
+        <span>{{ followup_tasks|length }}</span>
+      </div>
+      <div class="task-list">
+        {% for task in followup_tasks %}
+        <article class="task-card followup">
+          <div class="task-card-head">
+            <strong>{{ task.keyword }}</strong>
+            <span>{{ task.remaining_label }}</span>
+          </div>
+          <p class="task-group">{{ task.chat_name or task.chat_id }}</p>
+          <p class="task-excerpt">{{ task.message_excerpt }}</p>
+          <a class="task-link-button" href="{{ task.message_url }}" target="_blank" rel="noopener">打开原消息</a>
+        </article>
+        {% else %}
+        <div class="task-empty">暂无任务</div>
+        {% endfor %}
+      </div>
+    </section>
+  </main>
+  <nav class="mini-tabs" aria-label="Mini App 导航">
+    <a class="mini-tab active" href="/mini">任务</a>
+    <a class="mini-tab" href="/mini/keywords">关键词</a>
+    <a class="mini-tab" href="/mini/me">统计</a>
+  </nav>
+  <script src="/static/miniapp.js"></script>
+</body>
+</html>

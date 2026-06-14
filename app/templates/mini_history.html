@@ -1,0 +1,61 @@
+{% extends "mini_shell.html" %}
+
+{% block page_title %}历史检测{% endblock %}
+
+{% block header_action %}
+<a class="mini-pill mini-pill-link" href="/api/history/check">数据</a>
+{% endblock %}
+
+{% block content %}
+<section class="mini-section">
+  <h2>今日闭环</h2>
+  <div class="mini-card-list">
+    <article class="mini-stats-card">
+      <div class="mini-card-head">
+        <strong>{{ history.scope_label or '北京时间今日' }}</strong>
+        <span>{{ history.closed_loop.completion_rate or 0 }}%</span>
+      </div>
+      <div class="mini-stats-numbers">
+        <div><span>稍等总数</span><strong>{{ history.closed_loop.total or 0 }}</strong></div>
+        <div><span>已闭环</span><strong>{{ history.closed_loop.completed or 0 }}</strong></div>
+        <div><span>闭环率</span><strong>{{ history.closed_loop.completion_rate or 0 }}%</strong></div>
+      </div>
+      <div class="mini-history-counts">
+        <span>待处理：{{ history.closed_loop.pending or 0 }}</span>
+        <span>超时：{{ history.closed_loop.alerted or 0 }}</span>
+        <span>删除：{{ history.closed_loop.deleted or 0 }}</span>
+        <span>重复：{{ history.closed_loop.duplicate or 0 }}</span>
+      </div>
+    </article>
+  </div>
+</section>
+
+<section class="mini-section">
+  <h2>今日异常</h2>
+  <div class="mini-card-list">
+    <article class="mini-stats-card">
+      <div class="mini-card-head">
+        <strong>异常汇总</strong>
+        <span>{{ (history.anomaly_items or [])|length }} 条</span>
+      </div>
+      <div class="mini-history-counts">
+        {% for row in history.anomaly_counts or [] %}
+        <span>{{ row.label }}：{{ row.count }}</span>
+        {% else %}
+        <span>暂无异常</span>
+        {% endfor %}
+      </div>
+    </article>
+    {% for item in history.anomaly_items or [] %}
+    <article class="mini-audit-card">
+      <strong>{{ item.label }} · {{ item.status }} · {{ item.keyword }}</strong>
+      <p class="mini-card-meta">{{ item.chat_name }} · {{ item.started_at }}</p>
+      <p class="mini-card-text">{{ item.message_excerpt }}</p>
+      {% if item.message_url %}
+      <a class="mini-text-link" href="{{ item.message_url }}">查看消息</a>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
