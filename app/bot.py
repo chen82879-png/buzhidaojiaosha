@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from app.fixed_keywords import FIXED_KEYWORDS
-from app.ignore_words import is_ignored_followup_text
+from app.ignore_words import is_continuing_staff_reply_text, is_ignored_followup_text
 from app.matcher import match_enabled_keyword, match_message
 from app.models import MonitorTask, PendingMessage
 from app.telegram_utils import build_message_url
@@ -56,6 +56,15 @@ async def handle_incoming_message(
 
     if message.reply_to_message_id is not None:
         if is_configured_staff and hasattr(repo, "complete_tasks_referencing"):
+            if (
+                is_continuing_staff_reply_text(message.text)
+                and hasattr(repo, "pending_task_for_context")
+            ):
+                task = repo.pending_task_for_context(message.chat_id, message.reply_to_message_id)
+                if task is not None and task.task_type == "followup":
+                    if hasattr(repo, "add_task_context_message"):
+                        repo.add_task_context_message(task.id, message.message_id)
+                    return
             completed_tasks = repo.complete_tasks_referencing(
                 message.chat_id,
                 message.reply_to_message_id,

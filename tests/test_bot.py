@@ -282,6 +282,68 @@ async def test_customer_requote_completed_wait_creates_followup_task():
     assert queue.pending[-1][1] == datetime(2026, 6, 4, 13, 35, 25, tzinfo=timezone.utc).timestamp()
 
 
+async def test_processing_staff_reply_keeps_followup_task_pending():
+    repo = FakeRepo()
+    queue = FakeQueue()
+    await handle_incoming_message(
+        NormalizedTelegramMessage(
+            chat_id="-1001",
+            chat_name="Ops",
+            chat_username="",
+            message_id=50,
+            sender_user_id=10001,
+            sender_username="elk",
+            text="请稍等elk",
+            message_time=datetime(2026, 6, 4, 13, 11, 25, tzinfo=timezone.utc),
+            reply_to_message_id=40,
+        ),
+        repo,
+        queue,
+        timeout_minutes=15,
+        now_timestamp=1000,
+    )
+    repo.complete_tasks_referencing("-1001", 50, datetime(2026, 6, 4, 13, 12, 25, tzinfo=timezone.utc))
+    await handle_incoming_message(
+        NormalizedTelegramMessage(
+            chat_id="-1001",
+            chat_name="Ops",
+            chat_username="",
+            message_id=60,
+            sender_user_id=20001,
+            sender_username="customer",
+            text="这个再看下",
+            message_time=datetime(2026, 6, 4, 13, 20, 25, tzinfo=timezone.utc),
+            reply_to_message_id=50,
+        ),
+        repo,
+        queue,
+        timeout_minutes=15,
+        now_timestamp=1540,
+    )
+
+    await handle_incoming_message(
+        NormalizedTelegramMessage(
+            chat_id="-1001",
+            chat_name="Ops",
+            chat_username="",
+            message_id=61,
+            sender_user_id=10001,
+            sender_username="elk",
+            text="核实中",
+            message_time=datetime(2026, 6, 4, 13, 21, 25, tzinfo=timezone.utc),
+            reply_to_message_id=60,
+        ),
+        repo,
+        queue,
+        timeout_minutes=15,
+        now_timestamp=1600,
+    )
+
+    assert repo.tasks[1].task_type == "followup"
+    assert repo.tasks[1].status == "pending"
+    assert queue.closed == []
+
+
 async def test_ignored_customer_requote_does_not_create_followup_task():
     repo = FakeRepo()
     queue = FakeQueue()
