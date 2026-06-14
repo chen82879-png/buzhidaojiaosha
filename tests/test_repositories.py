@@ -76,6 +76,39 @@ def test_keyword_rollup_preserves_seven_day_stats_after_detail_cleanup(tmp_path)
     assert stats["请稍等elk"]["latest_message_url"] == "https://t.me/c/1571955528/101"
 
 
+def test_cleanup_old_details_removes_message_snapshots_older_than_three_days(tmp_path):
+    db_path = tmp_path / "app.sqlite3"
+    conn = connect(str(db_path))
+    migrate(conn)
+    repo = Repository(conn)
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
+    repo.upsert_message_snapshot(
+        chat_id="-1001",
+        message_id=1,
+        sender_user_id=10001,
+        sender_username="elk",
+        is_staff=True,
+        text="old snapshot",
+        message_time=now - timedelta(days=4),
+        reply_to_message_id=None,
+    )
+    repo.upsert_message_snapshot(
+        chat_id="-1001",
+        message_id=2,
+        sender_user_id=10001,
+        sender_username="elk",
+        is_staff=True,
+        text="recent snapshot",
+        message_time=now - timedelta(days=1),
+        reply_to_message_id=None,
+    )
+
+    repo.cleanup_old_details(now=now, detail_retention_days=3, rollup_retention_days=30)
+
+    rows = conn.execute("SELECT message_id FROM message_snapshots ORDER BY message_id").fetchall()
+    assert [row["message_id"] for row in rows] == [2]
+
+
 def test_keyword_statistics_enabled_is_independent_from_alert_recipients(tmp_path):
     db_path = tmp_path / "app.sqlite3"
     conn = connect(str(db_path))

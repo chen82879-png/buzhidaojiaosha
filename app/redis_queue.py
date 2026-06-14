@@ -66,6 +66,7 @@ class RedisQueue:
 
     async def close_pending(self, task_id: int) -> None:
         await self.redis.delete(self.pending_key(task_id))
+        await self.redis.delete(self.alerted_key(task_id))
         await self.redis.zrem("timeout_queue", self.member(task_id))
 
     async def due_members(self, now_timestamp: float, limit: int = 100) -> list[str]:
@@ -76,3 +77,19 @@ class RedisQueue:
 
     async def mark_alerted(self, task_id: int) -> bool:
         return bool(await self.redis.set(self.alerted_key(task_id), "1", nx=True))
+
+    async def cleanup_finished_tasks(self, is_task_pending) -> list[int]:
+        members = await self.redis.zrangebyscore("timeout_queue", "-inf", "+inf")
+        removed: list[int] = []
+        for member in members:
+            text = member.decode("utf-8") if isinstance(member, bytes) else str(member)
+            try:
+                task_id = int(text)
+            except ValueError:
+                await self.redis.zrem("timeout_queue", member)
+                continue
+            if is_task_pending(task_id):
+                continue
+            await self.close_pending(task_id)
+            removed.append(task_id)
+        return removed

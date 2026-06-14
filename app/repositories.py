@@ -248,6 +248,10 @@ class Repository:
             (detail_cutoff.isoformat(),),
         )
         self.conn.execute(
+            "DELETE FROM message_snapshots WHERE datetime(message_time) < datetime(?)",
+            (detail_cutoff.isoformat(),),
+        )
+        self.conn.execute(
             "DELETE FROM keyword_daily_stats WHERE stat_date < ?",
             (rollup_cutoff,),
         )

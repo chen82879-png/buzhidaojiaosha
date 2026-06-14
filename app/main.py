@@ -83,6 +83,15 @@ def format_local_datetime(value) -> str:
     return local_value.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def should_run_daily_cleanup(last_run: datetime | None, now: datetime) -> bool:
+    local_now = now.astimezone(DISPLAY_TZ) if now.tzinfo else now.replace(tzinfo=timezone.utc).astimezone(DISPLAY_TZ)
+    if local_now.hour < 4:
+        return False
+    if last_run is None:
+        return True
+    return last_run.astimezone(DISPLAY_TZ).date() != local_now.date()
+
+
 def build_task_view(task, now: datetime) -> dict[str, object]:
     due_at = task.due_at
     if isinstance(due_at, str):
@@ -233,11 +242,21 @@ def create_app(
         finally:
             await bot.session.close()
 
+    def is_task_still_pending(task_id: int) -> bool:
+        try:
+            return repo.get_monitor_task(task_id).status == "pending"
+        except Exception:
+            return False
+
     async def maintenance_loop() -> None:
+        last_daily_cleanup_at: datetime | None = None
         while True:
             now = datetime.now(timezone.utc)
             repo.rollup_keyword_hits(before=now)
             repo.cleanup_old_details(now=now, detail_retention_days=3, rollup_retention_days=30)
+            if should_run_daily_cleanup(last_daily_cleanup_at, now):
+                await queue.cleanup_finished_tasks(is_task_still_pending)
+                last_daily_cleanup_at = now
             await asyncio.sleep(3600)
 
     async def listener_loop() -> None:
