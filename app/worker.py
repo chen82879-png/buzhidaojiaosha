@@ -8,7 +8,7 @@ from app.redis_queue import RedisQueue
 TASK_TIMEOUT_MINUTES = {
     "followup": 15,
     "reply": 5,
-    "self_reply": 3,
+    "self_reply": 10,
 }
 
 

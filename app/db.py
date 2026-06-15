@@ -96,6 +96,7 @@ def migrate(conn: sqlite3.Connection) -> None:
             message_id INTEGER NOT NULL,
             sender_user_id INTEGER NOT NULL,
             sender_username TEXT NOT NULL DEFAULT '',
+            sender_display_name TEXT NOT NULL DEFAULT '',
             is_staff INTEGER NOT NULL DEFAULT 0,
             text TEXT NOT NULL DEFAULT '',
             message_time TEXT NOT NULL,
@@ -138,4 +139,7 @@ def migrate(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(keyword_configs)").fetchall()}
     if "alert_enabled" not in columns:
         conn.execute("ALTER TABLE keyword_configs ADD COLUMN alert_enabled INTEGER NOT NULL DEFAULT 1")
+    snapshot_columns = {row["name"] for row in conn.execute("PRAGMA table_info(message_snapshots)").fetchall()}
+    if "sender_display_name" not in snapshot_columns:
+        conn.execute("ALTER TABLE message_snapshots ADD COLUMN sender_display_name TEXT NOT NULL DEFAULT ''")
     conn.commit()

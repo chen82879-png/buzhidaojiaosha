@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from app.fixed_keywords import FIXED_KEYWORDS
 from app.models import KeywordConfig, MessageSnapshot, MonitorRule, MonitorTask, RuleKeyword, RuleStaff
+from app.special_accounts import is_self_reply_processing_text, is_special_self_reply_account
 
 DISPLAY_TZ = ZoneInfo("Asia/Shanghai")
 ANOMALY_LABELS = {
@@ -417,16 +418,18 @@ class Repository:
         text: str,
         message_time: datetime,
         reply_to_message_id: int | None,
+        sender_display_name: str = "",
     ) -> None:
         self.conn.execute(
             """
             INSERT INTO message_snapshots(
-                chat_id, message_id, sender_user_id, sender_username, is_staff,
-                text, message_time, reply_to_message_id, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                chat_id, message_id, sender_user_id, sender_username, sender_display_name,
+                is_staff, text, message_time, reply_to_message_id, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(chat_id, message_id) DO UPDATE SET
                 sender_user_id = excluded.sender_user_id,
                 sender_username = excluded.sender_username,
+                sender_display_name = excluded.sender_display_name,
                 is_staff = excluded.is_staff,
                 text = excluded.text,
                 message_time = excluded.message_time,
@@ -438,6 +441,7 @@ class Repository:
                 message_id,
                 sender_user_id,
                 sender_username,
+                sender_display_name,
                 int(is_staff),
                 text[:500],
                 message_time.isoformat(),
@@ -462,7 +466,41 @@ class Repository:
             text=row["text"],
             message_time=datetime.fromisoformat(row["message_time"]),
             reply_to_message_id=row["reply_to_message_id"],
+            sender_display_name=row["sender_display_name"],
         )
+
+    def latest_special_processing_reply_for_message(
+        self,
+        chat_id: str,
+        message_id: int,
+        account_names: set[str],
+    ) -> MessageSnapshot | None:
+        rows = self.conn.execute(
+            """
+            SELECT *
+            FROM message_snapshots
+            WHERE chat_id = ?
+              AND reply_to_message_id = ?
+            ORDER BY message_time DESC, message_id DESC
+            """,
+            (chat_id, message_id),
+        ).fetchall()
+        for row in rows:
+            snapshot = MessageSnapshot(
+                chat_id=row["chat_id"],
+                message_id=row["message_id"],
+                sender_user_id=row["sender_user_id"],
+                sender_username=row["sender_username"],
+                is_staff=bool(row["is_staff"]),
+                text=row["text"],
+                message_time=datetime.fromisoformat(row["message_time"]),
+                reply_to_message_id=row["reply_to_message_id"],
+                sender_display_name=row["sender_display_name"],
+            )
+            if is_special_self_reply_account(snapshot.sender_username, snapshot.sender_display_name):
+                if is_self_reply_processing_text(snapshot.text):
+                    return snapshot
+        return None
 
     def enabled_chat_count(self) -> int:
         row = self.conn.execute("SELECT COUNT(*) AS count FROM monitor_rules WHERE enabled = 1").fetchone()
