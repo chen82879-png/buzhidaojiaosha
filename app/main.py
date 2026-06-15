@@ -273,11 +273,18 @@ def create_app(
     async def run_startup_cleanup() -> None:
         if not hasattr(repo, "clear_reply_tasks_and_legacy_rule_keywords_once"):
             return
-        result = repo.clear_reply_tasks_and_legacy_rule_keywords_once(REPLY_RULE_CLEANUP_MARKER)
+        try:
+            result = repo.clear_reply_tasks_and_legacy_rule_keywords_once(REPLY_RULE_CLEANUP_MARKER)
+        except Exception:
+            logger.exception("startup cleanup failed")
+            return
         reply_task_ids = result.get("reply_task_ids", [])
         if reply_task_ids and hasattr(queue, "close_pending"):
             for task_id in reply_task_ids:
-                await queue.close_pending(task_id)
+                try:
+                    await queue.close_pending(task_id)
+                except Exception:
+                    logger.exception("failed to clear pending queue item for task %s", task_id)
         if not result.get("already_done"):
             logger.info(
                 "startup cleanup cleared %s reply tasks and %s legacy rule keywords",
