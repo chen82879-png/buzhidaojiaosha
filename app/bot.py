@@ -49,6 +49,12 @@ async def handle_incoming_message(
     configured_staff_ids = {
         chat_id for config in keyword_configs if config.enabled for chat_id in config.recipient_chat_ids
     }
+    configured_staff_ids.update(
+        staff.telegram_user_id
+        for rule in rules
+        for staff in rule.staff
+        if staff.enabled
+    )
     is_configured_staff = message.sender_user_id in configured_staff_ids
     if hasattr(repo, "upsert_message_snapshot"):
         repo.upsert_message_snapshot(

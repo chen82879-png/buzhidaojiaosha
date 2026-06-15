@@ -31,6 +31,7 @@ from app.worker import TimeoutWorker
 templates = Jinja2Templates(directory="app/templates")
 DISPLAY_TZ = ZoneInfo("Asia/Shanghai")
 logger = logging.getLogger(__name__)
+REPLY_RULE_CLEANUP_MARKER = "cleanup.reply_tasks_and_rule_keywords.v20260615"
 
 
 def build_repository(settings: Settings) -> Repository:
@@ -269,8 +270,24 @@ def create_app(
         except Exception:
             logger.exception("telegram listener stopped unexpectedly")
 
+    async def run_startup_cleanup() -> None:
+        if not hasattr(repo, "clear_reply_tasks_and_legacy_rule_keywords_once"):
+            return
+        result = repo.clear_reply_tasks_and_legacy_rule_keywords_once(REPLY_RULE_CLEANUP_MARKER)
+        reply_task_ids = result.get("reply_task_ids", [])
+        if reply_task_ids and hasattr(queue, "close_pending"):
+            for task_id in reply_task_ids:
+                await queue.close_pending(task_id)
+        if not result.get("already_done"):
+            logger.info(
+                "startup cleanup cleared %s reply tasks and %s legacy rule keywords",
+                len(reply_task_ids),
+                result.get("legacy_rule_keywords_deleted", 0),
+            )
+
     @app.on_event("startup")
     async def start_timeout_worker() -> None:
+        await run_startup_cleanup()
         if app.state.timeout_worker_enabled:
             app.state.timeout_worker_task = asyncio.create_task(timeout_worker_loop())
         if app.state.listener_enabled:

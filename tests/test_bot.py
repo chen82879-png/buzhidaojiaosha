@@ -517,6 +517,32 @@ async def test_customer_non_reply_without_enabled_keyword_creates_watching_reply
     assert queue.pending == []
 
 
+async def test_rule_staff_non_reply_message_does_not_create_global_reply_task():
+    repo = FakeRepo()
+    queue = FakeQueue()
+
+    await handle_incoming_message(
+        NormalizedTelegramMessage(
+            chat_id="-1001",
+            chat_name="Ops",
+            chat_username="",
+            message_id=94,
+            sender_user_id=9001,
+            sender_username="agent",
+            text="查询一下这个会员",
+            message_time=datetime(2026, 6, 4, 13, 14, 25, tzinfo=timezone.utc),
+            reply_to_message_id=None,
+        ),
+        repo,
+        queue,
+        timeout_minutes=15,
+        now_timestamp=1180,
+    )
+
+    assert repo.tasks == []
+    assert queue.pending == []
+
+
 async def test_customer_non_reply_with_enabled_keyword_does_not_create_reply_task():
     repo = FakeRepo()
     queue = FakeQueue()

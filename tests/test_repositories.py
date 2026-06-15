@@ -461,3 +461,88 @@ def test_history_check_summary_reports_today_closed_loop_and_anomalies(tmp_path)
     assert completed.id not in {item["id"] for item in summary["anomaly_items"]}
     assert deleted_wait.id not in {item["id"] for item in summary["anomaly_items"]}
     assert deleted_reply.id not in {item["id"] for item in summary["anomaly_items"]}
+
+
+def test_clear_reply_tasks_and_legacy_rule_keywords_once_keeps_monitoring_config(tmp_path):
+    db_path = tmp_path / "app.sqlite3"
+    conn = connect(str(db_path))
+    migrate(conn)
+    repo = Repository(conn)
+    rule_id = repo.create_monitor_rule(chat_id="-1001", chat_name="Ops", enabled=True)
+    repo.add_keyword(rule_id=rule_id, keyword="old keyword", enabled=True, note="legacy")
+    repo.add_staff(
+        rule_id=rule_id,
+        telegram_user_id=9001,
+        telegram_username="agent",
+        display_name="Agent",
+        enabled=True,
+    )
+    repo.save_keyword_configs([KeywordConfig(keyword="璇风◢绛塭lk", enabled=True, recipient_chat_ids=[10001])])
+    watching = repo.create_monitor_task(
+        task_type="reply",
+        status="watching",
+        rule_id=rule_id,
+        chat_id="-1001",
+        chat_name="Ops",
+        keyword="漏回",
+        staff_user_id=20001,
+        staff_username="customer",
+        root_message_id=10,
+        wait_message_id=10,
+        trigger_message_id=10,
+        message_excerpt="查询123",
+        message_url="https://t.me/c/1001/10",
+        recipient_chat_ids=[10001],
+        started_at=datetime(2026, 6, 15, 1, 0, tzinfo=timezone.utc),
+        due_at=datetime(2026, 6, 15, 1, 10, tzinfo=timezone.utc),
+    )
+    pending = repo.create_monitor_task(
+        task_type="reply",
+        status="pending",
+        rule_id=rule_id,
+        chat_id="-1001",
+        chat_name="Ops",
+        keyword="漏回",
+        staff_user_id=20002,
+        staff_username="customer2",
+        root_message_id=20,
+        wait_message_id=20,
+        trigger_message_id=20,
+        message_excerpt="查账号",
+        message_url="https://t.me/c/1001/20",
+        recipient_chat_ids=[10001],
+        started_at=datetime(2026, 6, 15, 1, 5, tzinfo=timezone.utc),
+        due_at=datetime(2026, 6, 15, 1, 15, tzinfo=timezone.utc),
+    )
+    wait = repo.create_monitor_task(
+        task_type="wait",
+        status="pending",
+        rule_id=rule_id,
+        chat_id="-1001",
+        chat_name="Ops",
+        keyword="璇风◢绛塭lk",
+        staff_user_id=10001,
+        staff_username="elk",
+        root_message_id=30,
+        wait_message_id=31,
+        trigger_message_id=31,
+        message_excerpt="璇风◢绛塭lk",
+        message_url="https://t.me/c/1001/31",
+        recipient_chat_ids=[10001],
+        started_at=datetime(2026, 6, 15, 1, 6, tzinfo=timezone.utc),
+        due_at=datetime(2026, 6, 15, 1, 14, tzinfo=timezone.utc),
+    )
+
+    result = repo.clear_reply_tasks_and_legacy_rule_keywords_once("cleanup.test")
+    second_result = repo.clear_reply_tasks_and_legacy_rule_keywords_once("cleanup.test")
+
+    assert result["reply_task_ids"] == [watching.id, pending.id]
+    assert result["legacy_rule_keywords_deleted"] == 1
+    assert second_result["already_done"] is True
+    assert repo.get_monitor_task(watching.id).status == "deleted"
+    assert repo.get_monitor_task(pending.id).status == "deleted"
+    assert repo.get_monitor_task(wait.id).status == "pending"
+    assert conn.execute("SELECT COUNT(*) AS count FROM rule_keywords").fetchone()["count"] == 0
+    assert repo.list_enabled_rules()[0].staff[0].telegram_user_id == 9001
+    keyword_config_count = conn.execute("SELECT COUNT(*) AS count FROM keyword_configs").fetchone()["count"]
+    assert keyword_config_count == 1

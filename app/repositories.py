@@ -258,6 +258,51 @@ class Repository:
         )
         self.conn.commit()
 
+    def clear_reply_tasks_and_legacy_rule_keywords_once(self, marker_key: str) -> dict[str, object]:
+        marker = self.conn.execute(
+            "SELECT value FROM settings WHERE key = ?",
+            (marker_key,),
+        ).fetchone()
+        if marker is not None and marker["value"] == "done":
+            return {
+                "already_done": True,
+                "reply_task_ids": [],
+                "legacy_rule_keywords_deleted": 0,
+            }
+
+        reply_rows = self.conn.execute(
+            """
+            SELECT id
+            FROM monitor_tasks
+            WHERE task_type = 'reply'
+              AND status IN ('watching', 'pending', 'alerted')
+            ORDER BY id
+            """
+        ).fetchall()
+        reply_task_ids = [int(row["id"]) for row in reply_rows]
+        if reply_task_ids:
+            self.conn.executemany(
+                "UPDATE monitor_tasks SET status = 'deleted' WHERE id = ?",
+                [(task_id,) for task_id in reply_task_ids],
+            )
+        deleted_keywords = self.conn.execute("DELETE FROM rule_keywords").rowcount
+        self.conn.execute(
+            """
+            INSERT INTO settings(key, value, updated_at)
+            VALUES (?, 'done', CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (marker_key,),
+        )
+        self.conn.commit()
+        return {
+            "already_done": False,
+            "reply_task_ids": reply_task_ids,
+            "legacy_rule_keywords_deleted": deleted_keywords,
+        }
+
     def keyword_statistics(self, now: datetime | None = None) -> list[dict[str, object]]:
         now = now or datetime.now().astimezone()
         local_now = now.astimezone(DISPLAY_TZ) if now.tzinfo else now.replace(tzinfo=DISPLAY_TZ)
