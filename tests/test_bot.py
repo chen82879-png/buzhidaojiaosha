@@ -511,6 +511,53 @@ async def test_customer_non_reply_with_enabled_keyword_does_not_create_reply_tas
     assert queue.pending == []
 
 
+async def test_staff_keyword_reply_closes_global_reply_and_creates_wait_task():
+    repo = FakeRepo()
+    queue = FakeQueue()
+    await handle_incoming_message(
+        NormalizedTelegramMessage(
+            chat_id="-1001",
+            chat_name="Ops",
+            chat_username="",
+            message_id=92,
+            sender_user_id=20001,
+            sender_username="customer",
+            text="查询123",
+            message_time=datetime(2026, 6, 4, 13, 14, 25, tzinfo=timezone.utc),
+            reply_to_message_id=None,
+        ),
+        repo,
+        queue,
+        timeout_minutes=15,
+        now_timestamp=1180,
+    )
+
+    await handle_incoming_message(
+        NormalizedTelegramMessage(
+            chat_id="-1001",
+            chat_name="Ops",
+            chat_username="",
+            message_id=93,
+            sender_user_id=10001,
+            sender_username="elk",
+            text="请稍等elk",
+            message_time=datetime(2026, 6, 4, 13, 15, 25, tzinfo=timezone.utc),
+            reply_to_message_id=92,
+        ),
+        repo,
+        queue,
+        timeout_minutes=15,
+        now_timestamp=1240,
+    )
+
+    assert repo.tasks[0].task_type == "reply"
+    assert repo.tasks[0].status == "completed"
+    assert repo.tasks[1].task_type == "wait"
+    assert repo.tasks[1].root_message_id == 92
+    assert queue.closed == [1]
+    assert queue.pending[-1][0].task_type == "wait"
+
+
 async def test_ignored_customer_reply_to_staff_message_does_not_create_reply_task():
     repo = FakeRepo()
     queue = FakeQueue()

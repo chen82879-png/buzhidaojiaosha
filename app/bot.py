@@ -84,7 +84,8 @@ async def handle_incoming_message(
             for task in completed_tasks:
                 await queue.close_pending(task.id)
             if completed_tasks:
-                return
+                if match_enabled_keyword(message.text, keyword_configs) is None:
+                    return
         elif hasattr(repo, "latest_completed_wait_for_reference"):
             if is_ignored_followup_text(message.text):
                 return
