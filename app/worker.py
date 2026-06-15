@@ -50,6 +50,16 @@ class TimeoutWorker:
 
         if self.task_repository is not None and hasattr(self.task_repository, "list_due_pending_tasks"):
             now = datetime.fromtimestamp(now_timestamp, tz=timezone.utc)
+            if hasattr(self.task_repository, "list_due_watching_reply_tasks") and hasattr(
+                self.task_repository,
+                "activate_watching_task",
+            ):
+                for task in self.task_repository.list_due_watching_reply_tasks(now):
+                    activated = self.task_repository.activate_watching_task(task.id, task.due_at)
+                    await self.queue.add_pending(
+                        self._pending_from_task(activated),
+                        due_at=activated.due_at.timestamp(),
+                    )
             for task in self.task_repository.list_due_pending_tasks(now):
                 member = self.queue.member(task.id)
                 if member not in pending_by_member:

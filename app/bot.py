@@ -16,6 +16,7 @@ from app.telegram_utils import build_message_url
 WAIT_TIMEOUT_MINUTES = 8
 FOLLOWUP_TIMEOUT_MINUTES = 15
 REPLY_TIMEOUT_MINUTES = 5
+REPLY_WATCH_MINUTES = 5
 SELF_REPLY_TIMEOUT_MINUTES = 10
 
 
@@ -64,6 +65,15 @@ async def handle_incoming_message(
 
     if message.reply_to_message_id is not None:
         if is_configured_staff and hasattr(repo, "complete_tasks_referencing"):
+            keyword_config = match_enabled_keyword(message.text, keyword_configs)
+            if keyword_config is not None and hasattr(repo, "complete_watching_replies_referencing"):
+                completed_watching_tasks = repo.complete_watching_replies_referencing(
+                    message.chat_id,
+                    message.reply_to_message_id,
+                    message.message_time,
+                )
+                for task in completed_watching_tasks:
+                    await queue.close_pending(task.id)
             if (
                 is_continuing_staff_reply_text(message.text)
                 and hasattr(repo, "pending_task_for_context")
@@ -84,7 +94,7 @@ async def handle_incoming_message(
             for task in completed_tasks:
                 await queue.close_pending(task.id)
             if completed_tasks:
-                if match_enabled_keyword(message.text, keyword_configs) is None:
+                if keyword_config is None:
                     return
         elif hasattr(repo, "latest_completed_wait_for_reference"):
             if is_ignored_followup_text(message.text):
@@ -208,11 +218,8 @@ async def _create_reply_task(repo, queue, message: NormalizedTelegramMessage) ->
         message_url=url,
         recipient_chat_ids=recipient_chat_ids,
         started_at=message.message_time,
-        due_at=message.message_time + timedelta(minutes=REPLY_TIMEOUT_MINUTES),
-    )
-    await queue.add_pending(
-        _pending_from_task(task, recipient_chat_ids),
-        due_at=message.message_time.timestamp() + REPLY_TIMEOUT_MINUTES * 60,
+        due_at=message.message_time + timedelta(minutes=REPLY_WATCH_MINUTES + REPLY_TIMEOUT_MINUTES),
+        status="watching",
     )
 
 

@@ -743,6 +743,37 @@ class Repository:
             self.conn.commit()
         return [self._task_from_row(row) for row in rows]
 
+    def complete_watching_replies_referencing(
+        self,
+        chat_id: str,
+        reply_to_message_id: int,
+        completed_at: datetime,
+    ) -> list[MonitorTask]:
+        rows = self.conn.execute(
+            """
+            SELECT DISTINCT mt.*
+            FROM monitor_tasks mt
+            LEFT JOIN monitor_task_context_messages ctx ON ctx.task_id = mt.id
+            WHERE mt.chat_id = ?
+              AND mt.status = 'watching'
+              AND mt.task_type = 'reply'
+              AND (
+                ? IN (mt.root_message_id, mt.wait_message_id, mt.trigger_message_id)
+                OR ctx.message_id = ?
+              )
+            ORDER BY mt.id
+            """,
+            (chat_id, reply_to_message_id, reply_to_message_id),
+        ).fetchall()
+        task_ids = [row["id"] for row in rows]
+        if task_ids:
+            self.conn.executemany(
+                "UPDATE monitor_tasks SET status = 'completed', completed_at = ? WHERE id = ?",
+                [(completed_at.isoformat(), task_id) for task_id in task_ids],
+            )
+            self.conn.commit()
+        return [self._task_from_row(row) for row in rows]
+
     def latest_completed_wait_for_reference(self, chat_id: str, message_id: int) -> MonitorTask | None:
         row = self.conn.execute(
             """
@@ -806,6 +837,14 @@ class Repository:
             (alerted_at.isoformat(), task_id),
         )
         self.conn.commit()
+
+    def activate_watching_task(self, task_id: int, due_at: datetime) -> MonitorTask:
+        self.conn.execute(
+            "UPDATE monitor_tasks SET status = 'pending', due_at = ? WHERE id = ? AND status = 'watching'",
+            (due_at.isoformat(), task_id),
+        )
+        self.conn.commit()
+        return self.get_monitor_task(task_id)
 
     def mark_stale_overdue_tasks_alerted(self, now: datetime, grace_minutes: int = 2) -> None:
         cutoff = now - timedelta(minutes=grace_minutes)
@@ -954,6 +993,19 @@ class Repository:
             WHERE status = 'pending'
               AND datetime(due_at) <= datetime(?)
             ORDER BY due_at, id
+            """,
+            (now.isoformat(),),
+        ).fetchall()
+        return [self._task_from_row(row) for row in rows]
+
+    def list_due_watching_reply_tasks(self, now: datetime) -> list[MonitorTask]:
+        rows = self.conn.execute(
+            """
+            SELECT * FROM monitor_tasks
+            WHERE status = 'watching'
+              AND task_type = 'reply'
+              AND datetime(started_at, '+5 minutes') <= datetime(?)
+            ORDER BY started_at, id
             """,
             (now.isoformat(),),
         ).fetchall()

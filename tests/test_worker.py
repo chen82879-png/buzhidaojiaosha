@@ -26,6 +26,8 @@ class FakeTaskRepository:
     def __init__(self):
         self.alerted = []
         self.due_tasks = []
+        self.due_watching_tasks = []
+        self.activated = []
         self.tasks = {}
 
     def mark_task_alerted(self, task_id, alerted_at):
@@ -33,6 +35,34 @@ class FakeTaskRepository:
 
     def list_due_pending_tasks(self, now):
         return self.due_tasks
+
+    def list_due_watching_reply_tasks(self, now):
+        return self.due_watching_tasks
+
+    def activate_watching_task(self, task_id, due_at):
+        self.activated.append((task_id, due_at))
+        task = self.tasks[task_id]
+        activated = MonitorTask(
+            id=task.id,
+            task_type=task.task_type,
+            status="pending",
+            rule_id=task.rule_id,
+            chat_id=task.chat_id,
+            chat_name=task.chat_name,
+            keyword=task.keyword,
+            staff_user_id=task.staff_user_id,
+            staff_username=task.staff_username,
+            root_message_id=task.root_message_id,
+            wait_message_id=task.wait_message_id,
+            trigger_message_id=task.trigger_message_id,
+            message_excerpt=task.message_excerpt,
+            message_url=task.message_url,
+            recipient_chat_ids=task.recipient_chat_ids,
+            started_at=task.started_at,
+            due_at=due_at,
+        )
+        self.tasks[task_id] = activated
+        return activated
 
     def get_monitor_task(self, task_id):
         return self.tasks[task_id]
@@ -174,6 +204,52 @@ async def test_due_sqlite_task_sends_alert_when_redis_member_is_missing(fake_red
 
     assert sender.sent == [(9001, 825085, 8)]
     assert repo.alerted[0][0] == 452
+
+
+async def test_watching_reply_task_activates_after_first_five_minutes_without_alert(fake_redis):
+    queue = RedisQueue(fake_redis)
+    rule = MonitorRule(id=1, chat_id="-1001", chat_name="Ops", enabled=True)
+    task = MonitorTask(
+        id=501,
+        task_type="reply",
+        status="watching",
+        rule_id=1,
+        chat_id="-1001",
+        chat_name="Ops",
+        keyword="漏回",
+        staff_user_id=20001,
+        staff_username="customer",
+        root_message_id=900,
+        wait_message_id=900,
+        trigger_message_id=900,
+        message_excerpt="查询123",
+        message_url="https://t.me/c/1001/900",
+        recipient_chat_ids=[9001],
+        started_at=datetime(2026, 6, 4, 13, 0, 0, tzinfo=timezone.utc),
+        due_at=datetime(2026, 6, 4, 13, 10, 0, tzinfo=timezone.utc),
+    )
+    repo = FakeTaskRepository()
+    repo.due_watching_tasks = [task]
+    repo.tasks[501] = task
+    sender = FakeAlertSender()
+    worker = TimeoutWorker(
+        queue=queue,
+        alert_sender=sender,
+        rules_provider=lambda: [rule],
+        task_repository=repo,
+        timeout_minutes=8,
+    )
+
+    await worker.run_once(now_timestamp=datetime(2026, 6, 4, 13, 5, 0, tzinfo=timezone.utc).timestamp())
+
+    assert repo.activated == [(501, datetime(2026, 6, 4, 13, 10, 0, tzinfo=timezone.utc))]
+    assert sender.sent == []
+    assert await queue.due_members(
+        now_timestamp=datetime(2026, 6, 4, 13, 9, 59, tzinfo=timezone.utc).timestamp()
+    ) == []
+    assert await queue.due_members(
+        now_timestamp=datetime(2026, 6, 4, 13, 10, 0, tzinfo=timezone.utc).timestamp()
+    ) == ["501"]
 
 
 async def test_redis_member_is_removed_without_alert_when_db_task_is_no_longer_pending(fake_redis):

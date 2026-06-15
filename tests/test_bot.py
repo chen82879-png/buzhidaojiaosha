@@ -101,6 +101,38 @@ class FakeRepo:
                 completed.append(completed_task)
         return completed
 
+    def complete_watching_replies_referencing(self, chat_id, reply_to_message_id, completed_at):
+        completed = []
+        for task in self.tasks:
+            if (
+                task.status == "watching"
+                and task.task_type == "reply"
+                and task.chat_id == chat_id
+                and reply_to_message_id in self.context_messages.get(task.id, set())
+            ):
+                completed_task = MonitorTask(
+                    id=task.id,
+                    task_type=task.task_type,
+                    status="completed",
+                    rule_id=task.rule_id,
+                    chat_id=task.chat_id,
+                    chat_name=task.chat_name,
+                    keyword=task.keyword,
+                    staff_user_id=task.staff_user_id,
+                    staff_username=task.staff_username,
+                    root_message_id=task.root_message_id,
+                    wait_message_id=task.wait_message_id,
+                    trigger_message_id=task.trigger_message_id,
+                    message_excerpt=task.message_excerpt,
+                    message_url=task.message_url,
+                    recipient_chat_ids=task.recipient_chat_ids,
+                    started_at=task.started_at,
+                    due_at=task.due_at,
+                )
+                self.tasks[task.id - 1] = completed_task
+                completed.append(completed_task)
+        return completed
+
     def latest_completed_wait_for_reference(self, chat_id, message_id):
         for task in reversed(self.tasks):
             if (
@@ -448,7 +480,7 @@ async def test_customer_reply_to_staff_message_does_not_create_reply_task():
     assert queue.pending == []
 
 
-async def test_customer_non_reply_without_enabled_keyword_creates_reply_task_for_all_alert_recipients():
+async def test_customer_non_reply_without_enabled_keyword_creates_watching_reply_task():
     class MultiRecipientRepo(FakeRepo):
         def list_keyword_configs(self):
             return [
@@ -479,10 +511,10 @@ async def test_customer_non_reply_without_enabled_keyword_creates_reply_task_for
     )
 
     assert repo.tasks[-1].task_type == "reply"
+    assert repo.tasks[-1].status == "watching"
     assert repo.tasks[-1].recipient_chat_ids == [10001, 10002]
-    assert repo.tasks[-1].due_at.minute == 19
-    assert queue.pending[-1][0].task_type == "reply"
-    assert queue.pending[-1][1] == datetime(2026, 6, 4, 13, 19, 25, tzinfo=timezone.utc).timestamp()
+    assert repo.tasks[-1].due_at.minute == 24
+    assert queue.pending == []
 
 
 async def test_customer_non_reply_with_enabled_keyword_does_not_create_reply_task():
@@ -702,8 +734,9 @@ async def test_customer_supplement_without_keyword_creates_reply_task():
     )
 
     assert repo.tasks[-1].task_type == "reply"
-    assert repo.tasks[-1].due_at.minute == 18
-    assert queue.pending[-1][0].task_type == "reply"
+    assert repo.tasks[-1].status == "watching"
+    assert repo.tasks[-1].due_at.minute == 23
+    assert queue.pending == []
 
 
 async def test_approval_after_special_processing_account_creates_self_reply_task():
