@@ -10,32 +10,33 @@
 <form id="keyword-form" class="mini-form-panel" method="post" action="/mini/keywords">
   <div class="mini-card-list">
     {% for keyword in keywords %}
-    <label class="mini-keyword-card">
+    <div class="mini-keyword-card" data-keyword-card>
       <span class="mini-keyword-main">
-        <input
-          class="wait-keyword-checkbox"
-          type="checkbox"
-          name="enabled::{{ keyword.text }}"
-          value="1"
-          aria-label="启用 {{ keyword.text }}"
-          {% if keyword.enabled %}checked{% endif %}
-        >
         <span>
           <strong>{{ keyword.text }}</strong>
           <em>命中 {{ keyword.hit_count }} · 识别</em>
         </span>
       </span>
-      <label class="mini-inline-toggle">
-        <input
-          class="wait-keyword-checkbox"
-          type="checkbox"
-          name="alert_enabled::{{ keyword.text }}"
-          value="1"
-          aria-label="预警 {{ keyword.text }}"
-          {% if keyword.alert_enabled %}checked{% endif %}
-        >
-        <span>超时预警</span>
-      </label>
+      <div class="mini-toggle-row">
+        <label class="mini-inline-toggle">
+          <input class="wait-keyword-checkbox" type="checkbox"
+                 name="stats_enabled::{{ keyword.text }}" value="1"
+                 {% if keyword.stats_enabled %}checked{% endif %}>
+          <span>统计</span>
+        </label>
+        <label class="mini-inline-toggle">
+          <input class="wait-keyword-checkbox task-toggle" type="checkbox"
+                 name="task_enabled::{{ keyword.text }}" value="1"
+                 {% if keyword.task_enabled %}checked{% endif %}>
+          <span>创建任务</span>
+        </label>
+        <label class="mini-inline-toggle">
+          <input class="wait-keyword-checkbox alert-toggle" type="checkbox"
+                 name="alert_enabled::{{ keyword.text }}" value="1"
+                 {% if keyword.alert_enabled %}checked{% endif %}>
+          <span>超时预警</span>
+        </label>
+      </div>
       <input
         class="mini-text-input"
         type="text"
@@ -46,8 +47,20 @@
         placeholder="接收预警 Chat ID，例如 123456789, -100123"
         aria-label="{{ keyword.text }} 接收预警 Chat ID"
       >
-    </label>
+    </div>
     {% endfor %}
   </div>
 </form>
+<script>
+document.querySelectorAll('[data-keyword-card]').forEach((card) => {
+  const task = card.querySelector('.task-toggle');
+  const alert = card.querySelector('.alert-toggle');
+  alert.addEventListener('change', () => {
+    if (alert.checked) task.checked = true;
+  });
+  task.addEventListener('change', () => {
+    if (!task.checked) alert.checked = false;
+  });
+});
+</script>
 {% endblock %}

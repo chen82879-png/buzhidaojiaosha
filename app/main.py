@@ -90,6 +90,9 @@ def build_task_view(task, now: datetime) -> dict[str, object]:
     if due_at.tzinfo is None:
         due_at = due_at.replace(tzinfo=timezone.utc)
     remaining_minutes = max(0, ceil((due_at - now).total_seconds() / 60))
+    first_alert_sent_at = getattr(task, "first_alert_sent_at", None)
+    severe_due_at = getattr(task, "severe_due_at", None)
+    severe_alert_sent_at = getattr(task, "severe_alert_sent_at", None)
     return {
         "id": getattr(task, "id", None),
         "status": getattr(task, "status", ""),
@@ -102,6 +105,14 @@ def build_task_view(task, now: datetime) -> dict[str, object]:
         "remaining_label": "已到期" if remaining_minutes == 0 else f"剩余 {remaining_minutes} 分钟",
         "due_label": as_local_datetime(due_at).strftime("%H:%M") if as_local_datetime(due_at) else "",
         "due_timestamp": int(due_at.timestamp()),
+        "first_alert_label": format_local_datetime(first_alert_sent_at),
+        "severe_due_label": format_local_datetime(severe_due_at),
+        "severe_due_time_label": (
+            as_local_datetime(severe_due_at).strftime("%H:%M")
+            if as_local_datetime(severe_due_at)
+            else ""
+        ),
+        "severe_alert_label": format_local_datetime(severe_alert_sent_at),
     }
 
 
@@ -148,6 +159,8 @@ def build_mini_keyword_rows(repo) -> list[dict[str, object]]:
             "text": keyword,
             "hit_count": hit_count_map.get(keyword, 0),
             "enabled": config_map.get(keyword).enabled if keyword in config_map else False,
+            "stats_enabled": config_map.get(keyword).stats_enabled if keyword in config_map else False,
+            "task_enabled": config_map.get(keyword).task_enabled if keyword in config_map else False,
             "alert_enabled": config_map.get(keyword).alert_enabled if keyword in config_map else True,
             "recipient_chat_ids": ", ".join(
                 str(chat_id) for chat_id in config_map.get(keyword).recipient_chat_ids
@@ -366,11 +379,16 @@ def create_app(
                 value = part.strip()
                 if value:
                     chat_ids.append(int(value))
+            stats_enabled = form.get(f"stats_enabled::{keyword}") == "1"
+            alert_enabled = form.get(f"alert_enabled::{keyword}") == "1"
+            task_enabled = form.get(f"task_enabled::{keyword}") == "1" or alert_enabled
             configs.append(
                 KeywordConfig(
                     keyword=keyword,
-                    enabled=form.get(f"enabled::{keyword}") == "1",
-                    alert_enabled=form.get(f"alert_enabled::{keyword}") == "1",
+                    enabled=stats_enabled or task_enabled,
+                    stats_enabled=stats_enabled,
+                    task_enabled=task_enabled,
+                    alert_enabled=alert_enabled,
                     recipient_chat_ids=chat_ids,
                 )
             )

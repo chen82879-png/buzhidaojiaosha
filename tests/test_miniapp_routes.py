@@ -140,10 +140,95 @@ def test_mini_keywords_page_uses_three_tab_white_shell():
     assert "保存" in response.text
     assert "接收预警 Chat ID" in response.text
     assert "超时预警" in response.text
+    assert "统计" in response.text
+    assert "创建任务" in response.text
+    assert "stats_enabled::请稍等elk" in response.text
+    assert "task_enabled::请稍等elk" in response.text
+    assert "alert_enabled::请稍等elk" in response.text
     assert "mini-shell" in response.text
     assert "/mini/tasks" in response.text
     assert "/mini/stats" in response.text
     assert "/mini/history" in response.text
+
+
+def test_keyword_post_normalizes_alert_to_task_and_keeps_stats_independent():
+    class Repo:
+        def __init__(self):
+            self.saved = []
+
+        def save_keyword_configs(self, configs):
+            self.saved = configs
+
+    repo = Repo()
+    client = TestClient(create_app(repo=repo))
+
+    response = client.post(
+        "/mini/keywords",
+        data={
+            "stats_enabled::请稍等elk": "1",
+            "alert_enabled::请稍等elk": "1",
+            "chat_ids::请稍等elk": "10001",
+        },
+        follow_redirects=False,
+    )
+
+    saved = next(config for config in repo.saved if config.keyword == "请稍等elk")
+    assert response.status_code == 303
+    assert saved.stats_enabled is True
+    assert saved.task_enabled is True
+    assert saved.alert_enabled is True
+
+
+def test_keyword_post_allows_statistics_without_task_or_alert():
+    class Repo:
+        def __init__(self):
+            self.saved = []
+
+        def save_keyword_configs(self, configs):
+            self.saved = configs
+
+    repo = Repo()
+    client = TestClient(create_app(repo=repo))
+
+    client.post(
+        "/mini/keywords",
+        data={"stats_enabled::请稍等elk": "1"},
+        follow_redirects=False,
+    )
+
+    saved = next(config for config in repo.saved if config.keyword == "请稍等elk")
+    assert saved.stats_enabled is True
+    assert saved.task_enabled is False
+    assert saved.alert_enabled is False
+
+
+def test_task_page_shows_severe_alert_due_state():
+    now = datetime(2026, 6, 19, 10, 5, tzinfo=timezone.utc)
+
+    class Repo:
+        def list_open_tasks(self):
+            return [
+                SimpleNamespace(
+                    id=90,
+                    status="alerted",
+                    task_type="wait",
+                    keyword="请稍等elk",
+                    chat_name="Ops",
+                    chat_id="-1001",
+                    message_excerpt="请稍等elk",
+                    message_url="https://t.me/c/1001/90",
+                    due_at=datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc),
+                    first_alert_sent_at=datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc),
+                    severe_due_at=datetime(2026, 6, 19, 10, 10, tzinfo=timezone.utc),
+                    severe_alert_sent_at=None,
+                )
+            ]
+
+    response = TestClient(create_app(repo=Repo(), now_provider=lambda: now)).get("/mini/tasks")
+
+    assert response.status_code == 200
+    assert "已首次预警" in response.text
+    assert "严重预警 18:10" in response.text
 
 
 def test_mini_keywords_page_hides_configured_groups():

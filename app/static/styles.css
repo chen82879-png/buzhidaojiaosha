@@ -974,6 +974,20 @@ a {
   font-size: 14px;
 }
 
+.mini-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+}
+
+.mini-alert-state {
+  margin: 6px 0 0;
+  color: #b42318;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .mini-panel-body .wait-keyword-checkbox {
   width: 26px;
   height: 26px;

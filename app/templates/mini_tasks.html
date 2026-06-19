@@ -38,6 +38,7 @@
         <span class="mini-countdown" data-due="{{ task.due_timestamp }}">{{ task.remaining_label }}</span>
       </div>
       <p class="mini-card-meta">{{ task.chat_name }} · {{ task.due_label }}</p>
+      {% if task.first_alert_label %}<p class="mini-alert-state">已首次预警 {{ task.first_alert_label }}{% if task.severe_due_time_label %} · 严重预警 {{ task.severe_due_time_label }}{% endif %}</p>{% endif %}
       <p class="mini-card-text">{{ task.message_excerpt }}</p>
       {% if task.message_url %}
       <a class="mini-link-button" href="{{ task.message_url }}">查看原消息</a>
@@ -64,6 +65,7 @@
         <span class="mini-countdown" data-due="{{ task.due_timestamp }}">{{ task.remaining_label }}</span>
       </div>
       <p class="mini-card-meta">{{ task.chat_name }} · {{ task.due_label }}</p>
+      {% if task.first_alert_label %}<p class="mini-alert-state">已首次预警 {{ task.first_alert_label }}{% if task.severe_due_time_label %} · 严重预警 {{ task.severe_due_time_label }}{% endif %}</p>{% endif %}
       <p class="mini-card-text">{{ task.message_excerpt }}</p>
       {% if task.message_url %}
       <a class="mini-link-button" href="{{ task.message_url }}">查看咨询</a>
@@ -90,6 +92,7 @@
         <span class="mini-countdown" data-due="{{ task.due_timestamp }}">{{ task.remaining_label }}</span>
       </div>
       <p class="mini-card-meta">{{ task.chat_name }} · {{ task.due_label }}</p>
+      {% if task.first_alert_label %}<p class="mini-alert-state">已首次预警 {{ task.first_alert_label }}{% if task.severe_due_time_label %} · 严重预警 {{ task.severe_due_time_label }}{% endif %}</p>{% endif %}
       <p class="mini-card-text">{{ task.message_excerpt }}</p>
       {% if task.message_url %}
       <a class="mini-link-button" href="{{ task.message_url }}">查看客户消息</a>
@@ -116,6 +119,7 @@
         <span class="mini-countdown" data-due="{{ task.due_timestamp }}">{{ task.remaining_label }}</span>
       </div>
       <p class="mini-card-meta">{{ task.chat_name }} · {{ task.due_label }}</p>
+      {% if task.first_alert_label %}<p class="mini-alert-state">已首次预警 {{ task.first_alert_label }}{% if task.severe_due_time_label %} · 严重预警 {{ task.severe_due_time_label }}{% endif %}</p>{% endif %}
       <p class="mini-card-text">{{ task.message_excerpt }}</p>
       {% if task.message_url %}
       <a class="mini-link-button" href="{{ task.message_url }}">查看追加消息</a>

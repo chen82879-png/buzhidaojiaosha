@@ -386,8 +386,8 @@ class Repository:
 
     def save_keyword_configs(self, configs: list[KeywordConfig]) -> None:
         for config in configs:
-            task_enabled = bool(config.task_enabled)
-            alert_enabled = bool(config.alert_enabled and task_enabled)
+            alert_enabled = bool(config.alert_enabled)
+            task_enabled = bool(config.task_enabled or alert_enabled)
             self.conn.execute(
                 """
                 INSERT INTO keyword_configs(
