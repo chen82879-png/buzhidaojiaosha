@@ -32,3 +32,13 @@ async def test_alert_dedupe_only_allows_first_mark(fake_redis):
 
     assert await queue.mark_alerted(10) is True
     assert await queue.mark_alerted(10) is False
+
+
+async def test_add_and_close_severe_queue_member(fake_redis):
+    queue = RedisQueue(fake_redis)
+
+    await queue.add_severe(task_id=20, due_at=1600)
+
+    assert await queue.due_severe_members(1600) == ["20"]
+    await queue.close_pending(20)
+    assert await queue.due_severe_members(1600) == []

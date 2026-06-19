@@ -38,6 +38,26 @@ def render_timeout_alert(
     )
 
 
+def render_severe_timeout_alert(
+    staff: RuleStaff,
+    pending: PendingMessage,
+    overdue_minutes: int,
+) -> str:
+    username = f"@{staff.telegram_username}" if staff.telegram_username else ""
+    keywords = "、".join(pending.matched_keywords)
+    return "\n".join(
+        [
+            "严重超时预警",
+            f"接收人员：{staff.display_name} ({username})",
+            f"关键词：{keywords}",
+            f"群组：{pending.chat_name or pending.chat_id}",
+            f"状态：首次预警后 {overdue_minutes} 分钟仍未闭环",
+            "原消息链接：打开原消息",
+            pending.message_url,
+        ]
+    )
+
+
 class TelegramAlertSender:
     def __init__(self, bot):
         self.bot = bot
@@ -49,6 +69,19 @@ class TelegramAlertSender:
         timeout_minutes: int,
     ) -> dict[str, str]:
         text = render_timeout_alert(staff, pending, timeout_minutes)
+        try:
+            await self.bot.send_message(chat_id=staff.telegram_user_id, text=text)
+            return {"status": "sent", "error_message": ""}
+        except Exception as exc:
+            return {"status": "failed", "error_message": str(exc)}
+
+    async def send_severe_timeout_alert(
+        self,
+        staff: RuleStaff,
+        pending: PendingMessage,
+        overdue_minutes: int,
+    ) -> dict[str, str]:
+        text = render_severe_timeout_alert(staff, pending, overdue_minutes)
         try:
             await self.bot.send_message(chat_id=staff.telegram_user_id, text=text)
             return {"status": "sent", "error_message": ""}

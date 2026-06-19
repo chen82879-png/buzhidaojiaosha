@@ -10,10 +10,15 @@ class FakeAlertSender:
     def __init__(self):
         self.sent = []
         self.staff = []
+        self.severe_sent = []
 
     async def send_timeout_alert(self, staff, pending, timeout_minutes):
         self.sent.append((staff.telegram_user_id, pending.message_id, timeout_minutes))
         self.staff.append(staff)
+        return {"status": "sent", "error_message": ""}
+
+    async def send_severe_timeout_alert(self, staff, pending, overdue_minutes):
+        self.severe_sent.append((staff.telegram_user_id, pending.message_id, overdue_minutes))
         return {"status": "sent", "error_message": ""}
 
 
@@ -27,9 +32,21 @@ class FakeTaskRepository:
         self.alerted = []
         self.due_tasks = []
         self.tasks = {}
+        self.severe_due_tasks = []
+        self.first_alerted = []
+        self.severe_alerted = []
 
     def mark_task_alerted(self, task_id, alerted_at):
         self.alerted.append((task_id, alerted_at))
+
+    def mark_first_alert_sent(self, task_id, alerted_at, severe_due_at):
+        self.first_alerted.append((task_id, alerted_at, severe_due_at))
+
+    def list_due_severe_tasks(self, now):
+        return self.severe_due_tasks
+
+    def mark_severe_alert_sent(self, task_id, sent_at):
+        self.severe_alerted.append((task_id, sent_at))
 
     def list_due_pending_tasks(self, now):
         return self.due_tasks
@@ -329,3 +346,56 @@ async def test_worker_removes_queue_member_when_alert_send_times_out(fake_redis)
     await worker.run_once(now_timestamp=1000)
 
     assert await queue.due_members(now_timestamp=1000) == []
+
+
+async def test_first_alert_schedules_severe_alert_ten_minutes_later(fake_redis):
+    queue = RedisQueue(fake_redis)
+    task = MonitorTask(
+        id=900, task_type="wait", status="pending", rule_id=1,
+        chat_id="-1001", chat_name="Ops", keyword="请稍等elk",
+        staff_user_id=10001, staff_username="elk", root_message_id=90,
+        wait_message_id=91, trigger_message_id=91, message_excerpt="请稍等elk",
+        message_url="https://t.me/c/1001/91", recipient_chat_ids=[10001],
+        started_at=datetime.fromtimestamp(500, tz=timezone.utc),
+        due_at=datetime.fromtimestamp(1000, tz=timezone.utc),
+    )
+    repo = FakeTaskRepository()
+    repo.tasks[900] = task
+    repo.due_tasks = [task]
+    sender = FakeAlertSender()
+    rule = MonitorRule(id=1, chat_id="-1001", chat_name="Ops", enabled=True)
+    worker = TimeoutWorker(queue, sender, lambda: [rule], task_repository=repo, timeout_minutes=8)
+
+    await worker.run_once(1000)
+
+    assert repo.first_alerted[0][0] == 900
+    assert repo.first_alerted[0][2].timestamp() == 1600
+    assert await queue.due_severe_members(1600) == ["900"]
+
+
+async def test_due_severe_alert_sends_once_and_recovers_from_sqlite(fake_redis):
+    queue = RedisQueue(fake_redis)
+    task = MonitorTask(
+        id=901, task_type="reply", status="alerted", rule_id=1,
+        chat_id="-1001", chat_name="Ops", keyword="漏回",
+        staff_user_id=20001, staff_username="customer", root_message_id=92,
+        wait_message_id=92, trigger_message_id=92, message_excerpt="查询",
+        message_url="https://t.me/c/1001/92", recipient_chat_ids=[10001],
+        started_at=datetime.fromtimestamp(700, tz=timezone.utc),
+        due_at=datetime.fromtimestamp(1000, tz=timezone.utc),
+        first_alert_sent_at=datetime.fromtimestamp(1000, tz=timezone.utc),
+        severe_due_at=datetime.fromtimestamp(1600, tz=timezone.utc),
+    )
+    repo = FakeTaskRepository()
+    repo.tasks[901] = task
+    repo.severe_due_tasks = [task]
+    sender = FakeAlertSender()
+    rule = MonitorRule(id=1, chat_id="-1001", chat_name="Ops", enabled=True)
+    worker = TimeoutWorker(queue, sender, lambda: [rule], task_repository=repo, timeout_minutes=8)
+
+    await worker.run_once(1600)
+    repo.severe_due_tasks = []
+    await worker.run_once(1601)
+
+    assert sender.severe_sent == [(10001, 92, 10)]
+    assert repo.severe_alerted[0][0] == 901

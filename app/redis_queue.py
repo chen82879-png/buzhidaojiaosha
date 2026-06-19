@@ -20,6 +20,10 @@ class RedisQueue:
     def alerted_key(task_id: int) -> str:
         return f"alerted-task:{task_id}"
 
+    @staticmethod
+    def severe_alerted_key(task_id: int) -> str:
+        return f"severe-alerted-task:{task_id}"
+
     async def add_pending(self, pending: PendingMessage, due_at: float) -> None:
         payload = {
             "task_id": pending.task_id,
@@ -66,7 +70,10 @@ class RedisQueue:
 
     async def close_pending(self, task_id: int) -> None:
         await self.redis.delete(self.pending_key(task_id))
+        await self.redis.delete(self.alerted_key(task_id))
+        await self.redis.delete(self.severe_alerted_key(task_id))
         await self.redis.zrem("timeout_queue", self.member(task_id))
+        await self.redis.zrem("severe_timeout_queue", self.member(task_id))
 
     async def due_members(self, now_timestamp: float, limit: int = 100) -> list[str]:
         return await self.redis.zrangebyscore("timeout_queue", 0, now_timestamp, start=0, num=limit)
@@ -76,3 +83,17 @@ class RedisQueue:
 
     async def mark_alerted(self, task_id: int) -> bool:
         return bool(await self.redis.set(self.alerted_key(task_id), "1", nx=True))
+
+    async def add_severe(self, task_id: int, due_at: float) -> None:
+        await self.redis.zadd("severe_timeout_queue", {self.member(task_id): due_at})
+
+    async def due_severe_members(self, now_timestamp: float, limit: int = 100) -> list[str]:
+        return await self.redis.zrangebyscore(
+            "severe_timeout_queue", 0, now_timestamp, start=0, num=limit
+        )
+
+    async def remove_severe_member(self, member: str) -> None:
+        await self.redis.zrem("severe_timeout_queue", member)
+
+    async def mark_severe_alerted(self, task_id: int) -> bool:
+        return bool(await self.redis.set(self.severe_alerted_key(task_id), "1", nx=True))

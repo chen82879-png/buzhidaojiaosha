@@ -454,3 +454,62 @@ def test_existing_enabled_keyword_defaults_all_layers_on(tmp_path):
     assert config.stats_enabled is True
     assert config.task_enabled is True
     assert config.alert_enabled is True
+
+
+def test_first_alert_schedules_one_severe_alert_and_can_be_completed(tmp_path):
+    conn = connect(str(tmp_path / "app.sqlite3"))
+    migrate(conn)
+    repo = Repository(conn)
+    rule_id = repo.create_monitor_rule(chat_id="-1001", chat_name="Ops", enabled=True)
+    task = repo.create_monitor_task(
+        task_type="wait", rule_id=rule_id, chat_id="-1001", chat_name="Ops",
+        keyword="请稍等elk", staff_user_id=10001, staff_username="elk",
+        root_message_id=40, wait_message_id=50, trigger_message_id=50,
+        message_excerpt="请稍等elk", message_url="https://t.me/c/1001/50",
+        recipient_chat_ids=[10001],
+        started_at=datetime(2026, 6, 19, 9, 52, tzinfo=timezone.utc),
+        due_at=datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc),
+    )
+    first_alert_at = datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc)
+    severe_due_at = first_alert_at + timedelta(minutes=10)
+
+    repo.mark_first_alert_sent(task.id, first_alert_at, severe_due_at)
+
+    alerted = repo.get_monitor_task(task.id)
+    assert alerted.status == "alerted"
+    assert alerted.first_alert_sent_at == first_alert_at
+    assert alerted.severe_due_at == severe_due_at
+    assert repo.list_due_severe_tasks(severe_due_at) == [alerted]
+    completed = repo.complete_tasks_referencing(
+        "-1001", 50, datetime(2026, 6, 19, 10, 5, tzinfo=timezone.utc)
+    )
+    assert completed[0].id == task.id
+    assert repo.list_due_severe_tasks(severe_due_at) == []
+
+
+def test_mark_severe_alert_sent_is_idempotent(tmp_path):
+    conn = connect(str(tmp_path / "app.sqlite3"))
+    migrate(conn)
+    repo = Repository(conn)
+    rule_id = repo.create_monitor_rule(chat_id="-1001", chat_name="Ops", enabled=True)
+    task = repo.create_monitor_task(
+        task_type="reply", rule_id=rule_id, chat_id="-1001", chat_name="Ops",
+        keyword="漏回", staff_user_id=20001, staff_username="customer",
+        root_message_id=70, wait_message_id=70, trigger_message_id=70,
+        message_excerpt="查询", message_url="https://t.me/c/1001/70",
+        recipient_chat_ids=[10001],
+        started_at=datetime(2026, 6, 19, 9, 55, tzinfo=timezone.utc),
+        due_at=datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc),
+    )
+    repo.mark_first_alert_sent(
+        task.id,
+        datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc),
+        datetime(2026, 6, 19, 10, 10, tzinfo=timezone.utc),
+    )
+    first = datetime(2026, 6, 19, 10, 10, tzinfo=timezone.utc)
+    second = datetime(2026, 6, 19, 10, 11, tzinfo=timezone.utc)
+
+    repo.mark_severe_alert_sent(task.id, first)
+    repo.mark_severe_alert_sent(task.id, second)
+
+    assert repo.get_monitor_task(task.id).severe_alert_sent_at == first

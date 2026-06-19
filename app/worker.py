@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.models import MonitorRule, MonitorTask, PendingMessage, RuleStaff
 from app.redis_queue import RedisQueue
@@ -10,6 +10,7 @@ TASK_TIMEOUT_MINUTES = {
     "reply": 5,
     "self_reply": 3,
 }
+SEVERE_ALERT_DELAY_MINUTES = 10
 
 
 class TimeoutWorker:
@@ -61,6 +62,7 @@ class TimeoutWorker:
             if not await self.queue.mark_alerted(task_id):
                 if self.task_repository is not None:
                     self.task_repository.mark_task_alerted(task_id, alerted_at)
+                    await self._schedule_severe(task_id, alerted_at)
                 await self.queue.remove_member(member)
                 continue
             if self.task_repository is not None:
@@ -76,10 +78,11 @@ class TimeoutWorker:
                 ]
             else:
                 staff_list = [staff for staff in rule.staff if staff.enabled]
+            delivered = False
             for staff in staff_list:
                 if staff.enabled:
                     try:
-                        await asyncio.wait_for(
+                        result = await asyncio.wait_for(
                             self.alert_sender.send_timeout_alert(
                                 staff,
                                 pending,
@@ -87,9 +90,83 @@ class TimeoutWorker:
                             ),
                             timeout=self.send_timeout_seconds,
                         )
+                        delivered = delivered or result.get("status") == "sent"
                     except TimeoutError:
                         pass
+            if delivered:
+                await self._schedule_severe(task_id, alerted_at)
             await self.queue.remove_member(member)
+
+        await self._run_severe_alerts(now_timestamp, rules)
+
+    async def _schedule_severe(self, task_id: int, alerted_at: datetime) -> None:
+        if self.task_repository is None or not hasattr(
+            self.task_repository, "mark_first_alert_sent"
+        ):
+            return
+        severe_due_at = alerted_at + timedelta(minutes=SEVERE_ALERT_DELAY_MINUTES)
+        self.task_repository.mark_first_alert_sent(task_id, alerted_at, severe_due_at)
+        await self.queue.add_severe(task_id, severe_due_at.timestamp())
+
+    async def _run_severe_alerts(
+        self,
+        now_timestamp: float,
+        rules: dict[int, MonitorRule],
+    ) -> None:
+        if self.task_repository is None or not hasattr(
+            self.task_repository, "list_due_severe_tasks"
+        ):
+            return
+        now = datetime.fromtimestamp(now_timestamp, tz=timezone.utc)
+        tasks_by_id: dict[int, MonitorTask] = {
+            task.id: task for task in self.task_repository.list_due_severe_tasks(now)
+        }
+        for member in await self.queue.due_severe_members(now_timestamp):
+            try:
+                task_id = int(member)
+                task = self.task_repository.get_monitor_task(task_id)
+            except (ValueError, KeyError):
+                await self.queue.remove_severe_member(member)
+                continue
+            if task.status == "alerted" and task.severe_alert_sent_at is None:
+                tasks_by_id[task_id] = task
+            else:
+                await self.queue.remove_severe_member(member)
+
+        for task_id, task in tasks_by_id.items():
+            member = self.queue.member(task_id)
+            if not await self.queue.mark_severe_alerted(task_id):
+                await self.queue.remove_severe_member(member)
+                continue
+            rule = rules.get(task.rule_id)
+            if rule is None:
+                await self.queue.remove_severe_member(member)
+                continue
+            pending = self._pending_from_task(task)
+            staff_list = (
+                [self._recipient_staff(pending, chat_id) for chat_id in pending.recipient_chat_ids]
+                if pending.recipient_chat_ids
+                else [staff for staff in rule.staff if staff.enabled]
+            )
+            delivered = False
+            for staff in staff_list:
+                if not staff.enabled:
+                    continue
+                try:
+                    result = await asyncio.wait_for(
+                        self.alert_sender.send_severe_timeout_alert(
+                            staff,
+                            pending,
+                            SEVERE_ALERT_DELAY_MINUTES,
+                        ),
+                        timeout=self.send_timeout_seconds,
+                    )
+                    delivered = delivered or result.get("status") == "sent"
+                except TimeoutError:
+                    pass
+            if delivered and hasattr(self.task_repository, "mark_severe_alert_sent"):
+                self.task_repository.mark_severe_alert_sent(task_id, now)
+            await self.queue.remove_severe_member(member)
 
     def _task_is_still_pending(self, task_id: int) -> bool:
         if self.task_repository is None or not hasattr(self.task_repository, "get_monitor_task"):

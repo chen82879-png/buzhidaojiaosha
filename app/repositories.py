@@ -727,7 +727,7 @@ class Repository:
             FROM monitor_tasks mt
             LEFT JOIN monitor_task_context_messages ctx ON ctx.task_id = mt.id
             WHERE mt.chat_id = ?
-              AND mt.status = 'pending'
+              AND mt.status IN ('pending', 'alerted')
               AND (
                 ? IN (mt.root_message_id, mt.wait_message_id, mt.trigger_message_id)
                 OR ctx.message_id = ?
@@ -809,6 +809,51 @@ class Repository:
         )
         self.conn.commit()
 
+    def mark_first_alert_sent(
+        self,
+        task_id: int,
+        alerted_at: datetime,
+        severe_due_at: datetime,
+    ) -> None:
+        self.conn.execute(
+            """
+            UPDATE monitor_tasks
+            SET status = 'alerted',
+                alert_sent_at = ?,
+                first_alert_sent_at = COALESCE(first_alert_sent_at, ?),
+                severe_due_at = COALESCE(severe_due_at, ?)
+            WHERE id = ? AND status IN ('pending', 'alerted')
+            """,
+            (alerted_at.isoformat(), alerted_at.isoformat(), severe_due_at.isoformat(), task_id),
+        )
+        self.conn.commit()
+
+    def list_due_severe_tasks(self, now: datetime) -> list[MonitorTask]:
+        rows = self.conn.execute(
+            """
+            SELECT * FROM monitor_tasks
+            WHERE status = 'alerted'
+              AND first_alert_sent_at IS NOT NULL
+              AND severe_due_at IS NOT NULL
+              AND severe_alert_sent_at IS NULL
+              AND datetime(severe_due_at) <= datetime(?)
+            ORDER BY severe_due_at, id
+            """,
+            (now.isoformat(),),
+        ).fetchall()
+        return [self._task_from_row(row) for row in rows]
+
+    def mark_severe_alert_sent(self, task_id: int, sent_at: datetime) -> None:
+        self.conn.execute(
+            """
+            UPDATE monitor_tasks
+            SET severe_alert_sent_at = COALESCE(severe_alert_sent_at, ?)
+            WHERE id = ? AND status = 'alerted'
+            """,
+            (sent_at.isoformat(), task_id),
+        )
+        self.conn.commit()
+
     def mark_stale_overdue_tasks_alerted(self, now: datetime, grace_minutes: int = 2) -> None:
         cutoff = now - timedelta(minutes=grace_minutes)
         self.conn.execute(
@@ -836,6 +881,7 @@ class Repository:
             """
             SELECT * FROM monitor_tasks
             WHERE status = 'pending'
+               OR (status = 'alerted' AND first_alert_sent_at IS NOT NULL)
             ORDER BY due_at, id
             """
         ).fetchall()
