@@ -568,6 +568,40 @@ class Repository:
         if commit:
             self.conn.commit()
 
+    def task_context_message_ids(self, task_id: int) -> list[int]:
+        rows = self.conn.execute(
+            """
+            SELECT message_id FROM monitor_task_context_messages
+            WHERE task_id = ? ORDER BY message_id
+            """,
+            (task_id,),
+        ).fetchall()
+        return [int(row["message_id"]) for row in rows]
+
+    def delete_open_tasks_referencing(self, chat_id: str, message_id: int) -> list[MonitorTask]:
+        rows = self.conn.execute(
+            """
+            SELECT DISTINCT mt.*
+            FROM monitor_tasks mt
+            LEFT JOIN monitor_task_context_messages ctx ON ctx.task_id = mt.id
+            WHERE mt.chat_id = ?
+              AND mt.status IN ('pending', 'alerted')
+              AND (
+                ? IN (mt.root_message_id, mt.wait_message_id, mt.trigger_message_id)
+                OR ctx.message_id = ?
+              )
+            ORDER BY mt.id
+            """,
+            (chat_id, message_id, message_id),
+        ).fetchall()
+        if rows:
+            self.conn.executemany(
+                "UPDATE monitor_tasks SET status = 'deleted' WHERE id = ?",
+                [(row["id"],) for row in rows],
+            )
+            self.conn.commit()
+        return [self._task_from_row(row) for row in rows]
+
     def pending_task_for_context(self, chat_id: str, reply_to_message_id: int) -> MonitorTask | None:
         row = self.conn.execute(
             """

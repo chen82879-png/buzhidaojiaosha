@@ -128,3 +128,26 @@ async def test_deleted_first_wait_ignores_duplicate_when_keyword_is_not_configur
     assert repo.get_monitor_task(2).status == "deleted"
     assert queue.pending == []
 
+
+async def test_deleted_additional_context_message_closes_linked_task(tmp_path):
+    repo, rule_id = make_repo(tmp_path)
+    started = datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc)
+    task = repo.create_monitor_task(
+        task_type="followup", rule_id=rule_id, chat_id="-1001", chat_name="Ops",
+        keyword="请稍等elk", staff_user_id=10001, staff_username="elk",
+        root_message_id=40, wait_message_id=50, trigger_message_id=60,
+        message_excerpt="继续查询", message_url="https://t.me/c/1001/60",
+        recipient_chat_ids=[10001], started_at=started,
+        due_at=started + timedelta(minutes=15),
+    )
+    repo.add_task_context_message(task.id, 70)
+    queue = FakeQueue()
+
+    async def deleted(_chat_id, message_id):
+        return message_id == 70
+
+    await cleanup_deleted_wait_tasks(repo, queue, deleted)
+
+    assert repo.get_monitor_task(task.id).status == "deleted"
+    assert queue.closed == [task.id]
+

@@ -513,3 +513,30 @@ def test_mark_severe_alert_sent_is_idempotent(tmp_path):
     repo.mark_severe_alert_sent(task.id, second)
 
     assert repo.get_monitor_task(task.id).severe_alert_sent_at == first
+
+
+def test_delete_open_tasks_referencing_cancels_all_four_task_types(tmp_path):
+    conn = connect(str(tmp_path / "app.sqlite3"))
+    migrate(conn)
+    repo = Repository(conn)
+    rule_id = repo.create_monitor_rule(chat_id="-1001", chat_name="Ops", enabled=True)
+    created_ids = []
+    for index, task_type in enumerate(("wait", "followup", "reply", "self_reply"), start=1):
+        task = repo.create_monitor_task(
+            task_type=task_type, rule_id=rule_id, chat_id="-1001", chat_name="Ops",
+            keyword="请稍等elk", staff_user_id=10001, staff_username="elk",
+            root_message_id=100 + index, wait_message_id=200 + index,
+            trigger_message_id=300 + index, message_excerpt=task_type,
+            message_url=f"https://t.me/c/1001/{300 + index}", recipient_chat_ids=[10001],
+            started_at=datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc),
+            due_at=datetime(2026, 6, 19, 10, 8, tzinfo=timezone.utc),
+        )
+        repo.add_task_context_message(task.id, 999)
+        created_ids.append(task.id)
+
+    deleted = repo.delete_open_tasks_referencing("-1001", 999)
+    deleted_again = repo.delete_open_tasks_referencing("-1001", 999)
+
+    assert [task.id for task in deleted] == created_ids
+    assert deleted_again == []
+    assert {repo.get_monitor_task(task_id).status for task_id in created_ids} == {"deleted"}
