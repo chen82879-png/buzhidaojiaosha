@@ -87,6 +87,8 @@ def migrate(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS keyword_configs (
             keyword TEXT PRIMARY KEY,
             enabled INTEGER NOT NULL DEFAULT 0,
+            stats_enabled INTEGER NOT NULL DEFAULT 1,
+            task_enabled INTEGER NOT NULL DEFAULT 1,
             alert_enabled INTEGER NOT NULL DEFAULT 1,
             recipient_chat_ids TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -124,6 +126,9 @@ def migrate(conn: sqlite3.Connection) -> None:
             due_at TEXT NOT NULL,
             completed_at TEXT,
             alert_sent_at TEXT,
+            first_alert_sent_at TEXT,
+            severe_due_at TEXT,
+            severe_alert_sent_at TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS monitor_task_context_messages (
@@ -138,4 +143,17 @@ def migrate(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(keyword_configs)").fetchall()}
     if "alert_enabled" not in columns:
         conn.execute("ALTER TABLE keyword_configs ADD COLUMN alert_enabled INTEGER NOT NULL DEFAULT 1")
+    if "stats_enabled" not in columns:
+        conn.execute("ALTER TABLE keyword_configs ADD COLUMN stats_enabled INTEGER NOT NULL DEFAULT 1")
+        conn.execute("UPDATE keyword_configs SET stats_enabled = enabled")
+    if "task_enabled" not in columns:
+        conn.execute("ALTER TABLE keyword_configs ADD COLUMN task_enabled INTEGER NOT NULL DEFAULT 1")
+        conn.execute("UPDATE keyword_configs SET task_enabled = enabled")
+    task_columns = {row["name"] for row in conn.execute("PRAGMA table_info(monitor_tasks)").fetchall()}
+    if "first_alert_sent_at" not in task_columns:
+        conn.execute("ALTER TABLE monitor_tasks ADD COLUMN first_alert_sent_at TEXT")
+    if "severe_due_at" not in task_columns:
+        conn.execute("ALTER TABLE monitor_tasks ADD COLUMN severe_due_at TEXT")
+    if "severe_alert_sent_at" not in task_columns:
+        conn.execute("ALTER TABLE monitor_tasks ADD COLUMN severe_alert_sent_at TEXT")
     conn.commit()

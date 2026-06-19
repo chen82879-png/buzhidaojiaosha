@@ -55,6 +55,8 @@ class KeywordConfig:
     enabled: bool
     recipient_chat_ids: list[int]
     alert_enabled: bool = True
+    stats_enabled: bool = True
+    task_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -76,6 +78,9 @@ class MonitorTask:
     recipient_chat_ids: list[int]
     started_at: datetime
     due_at: datetime
+    first_alert_sent_at: datetime | None = None
+    severe_due_at: datetime | None = None
+    severe_alert_sent_at: datetime | None = None
 
 
 @dataclass(frozen=True)

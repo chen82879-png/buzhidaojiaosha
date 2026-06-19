@@ -428,3 +428,29 @@ def test_history_check_summary_reports_today_closed_loop_and_anomalies(tmp_path)
     assert completed.id not in {item["id"] for item in summary["anomaly_items"]}
     assert deleted_wait.id not in {item["id"] for item in summary["anomaly_items"]}
     assert deleted_reply.id not in {item["id"] for item in summary["anomaly_items"]}
+
+
+def test_migrate_adds_keyword_layers_and_severe_alert_fields(tmp_path):
+    conn = connect(str(tmp_path / "app.sqlite3"))
+    migrate(conn)
+
+    keyword_columns = {row["name"] for row in conn.execute("PRAGMA table_info(keyword_configs)")}
+    task_columns = {row["name"] for row in conn.execute("PRAGMA table_info(monitor_tasks)")}
+
+    assert {"stats_enabled", "task_enabled", "alert_enabled"} <= keyword_columns
+    assert {"first_alert_sent_at", "severe_due_at", "severe_alert_sent_at"} <= task_columns
+
+
+def test_existing_enabled_keyword_defaults_all_layers_on(tmp_path):
+    conn = connect(str(tmp_path / "app.sqlite3"))
+    migrate(conn)
+    repo = Repository(conn)
+    repo.save_keyword_configs(
+        [KeywordConfig(keyword="请稍等elk", enabled=True, recipient_chat_ids=[10001])]
+    )
+
+    config = next(item for item in repo.list_keyword_configs() if item.keyword == "请稍等elk")
+
+    assert config.stats_enabled is True
+    assert config.task_enabled is True
+    assert config.alert_enabled is True

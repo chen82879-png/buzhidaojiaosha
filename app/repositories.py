@@ -351,14 +351,26 @@ class Repository:
 
     def list_keyword_configs(self) -> list[KeywordConfig]:
         rows = self.conn.execute(
-            "SELECT keyword, enabled, alert_enabled, recipient_chat_ids FROM keyword_configs"
+            """
+            SELECT keyword, enabled, stats_enabled, task_enabled, alert_enabled, recipient_chat_ids
+            FROM keyword_configs
+            """
         ).fetchall()
         by_keyword = {row["keyword"]: row for row in rows}
         configs: list[KeywordConfig] = []
         for keyword in FIXED_KEYWORDS:
             row = by_keyword.get(keyword)
             if row is None:
-                configs.append(KeywordConfig(keyword=keyword, enabled=False, recipient_chat_ids=[]))
+                configs.append(
+                    KeywordConfig(
+                        keyword=keyword,
+                        enabled=False,
+                        recipient_chat_ids=[],
+                        stats_enabled=False,
+                        task_enabled=False,
+                        alert_enabled=False,
+                    )
+                )
             else:
                 configs.append(
                     KeywordConfig(
@@ -366,18 +378,27 @@ class Repository:
                         enabled=bool(row["enabled"]),
                         recipient_chat_ids=self._parse_chat_ids(row["recipient_chat_ids"]),
                         alert_enabled=bool(row["alert_enabled"]),
+                        stats_enabled=bool(row["stats_enabled"]),
+                        task_enabled=bool(row["task_enabled"]),
                     )
                 )
         return configs
 
     def save_keyword_configs(self, configs: list[KeywordConfig]) -> None:
         for config in configs:
+            task_enabled = bool(config.task_enabled)
+            alert_enabled = bool(config.alert_enabled and task_enabled)
             self.conn.execute(
                 """
-                INSERT INTO keyword_configs(keyword, enabled, alert_enabled, recipient_chat_ids, updated_at)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO keyword_configs(
+                    keyword, enabled, stats_enabled, task_enabled, alert_enabled,
+                    recipient_chat_ids, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(keyword) DO UPDATE SET
                     enabled = excluded.enabled,
+                    stats_enabled = excluded.stats_enabled,
+                    task_enabled = excluded.task_enabled,
                     alert_enabled = excluded.alert_enabled,
                     recipient_chat_ids = excluded.recipient_chat_ids,
                     updated_at = CURRENT_TIMESTAMP
@@ -385,7 +406,9 @@ class Repository:
                 (
                     config.keyword,
                     int(config.enabled),
-                    int(config.alert_enabled),
+                    int(config.stats_enabled),
+                    int(task_enabled),
+                    int(alert_enabled),
                     self._dump_chat_ids(config.recipient_chat_ids),
                 ),
             )
@@ -393,7 +416,10 @@ class Repository:
 
     def enabled_keyword_config(self, keyword: str) -> KeywordConfig | None:
         row = self.conn.execute(
-            "SELECT keyword, enabled, alert_enabled, recipient_chat_ids FROM keyword_configs WHERE keyword = ?",
+            """
+            SELECT keyword, enabled, stats_enabled, task_enabled, alert_enabled, recipient_chat_ids
+            FROM keyword_configs WHERE keyword = ?
+            """,
             (keyword,),
         ).fetchone()
         if row is None or not bool(row["enabled"]) or not bool(row["alert_enabled"]):
@@ -401,7 +427,14 @@ class Repository:
         chat_ids = self._parse_chat_ids(row["recipient_chat_ids"])
         if not chat_ids:
             return None
-        return KeywordConfig(keyword=row["keyword"], enabled=True, recipient_chat_ids=chat_ids, alert_enabled=True)
+        return KeywordConfig(
+            keyword=row["keyword"],
+            enabled=True,
+            recipient_chat_ids=chat_ids,
+            alert_enabled=True,
+            stats_enabled=bool(row["stats_enabled"]),
+            task_enabled=bool(row["task_enabled"]),
+        )
 
     def upsert_message_snapshot(
         self,
@@ -669,6 +702,17 @@ class Repository:
             recipient_chat_ids=self._parse_chat_ids(row["recipient_chat_ids"]),
             started_at=datetime.fromisoformat(row["started_at"]),
             due_at=datetime.fromisoformat(row["due_at"]),
+            first_alert_sent_at=(
+                datetime.fromisoformat(row["first_alert_sent_at"])
+                if row["first_alert_sent_at"]
+                else None
+            ),
+            severe_due_at=(datetime.fromisoformat(row["severe_due_at"]) if row["severe_due_at"] else None),
+            severe_alert_sent_at=(
+                datetime.fromisoformat(row["severe_alert_sent_at"])
+                if row["severe_alert_sent_at"]
+                else None
+            ),
         )
 
     def complete_tasks_referencing(
