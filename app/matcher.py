@@ -22,6 +22,6 @@ def match_message(chat_id: str, text: str, rules: list[MonitorRule]) -> MatchRes
 
 def match_enabled_keyword(text: str, configs: list[KeywordConfig]) -> KeywordConfig | None:
     for config in configs:
-        if config.enabled and config.alert_enabled and config.recipient_chat_ids and config.keyword in text:
+        if config.enabled and config.task_enabled and config.keyword in text:
             return config
     return None

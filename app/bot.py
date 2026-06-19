@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from app.fixed_keywords import FIXED_KEYWORDS
-from app.ignore_words import is_ignored_followup_text
+from app.ignore_words import is_completed_acknowledgement, is_ignored_followup_text
 from app.matcher import match_enabled_keyword, match_message
 from app.models import MonitorTask, PendingMessage
 from app.telegram_utils import build_message_url
@@ -77,6 +77,8 @@ async def handle_incoming_message(
                 return
 
     if not is_configured_staff:
+        if is_completed_acknowledgement(message.text):
+            return
         if message.reply_to_message_id is not None and hasattr(repo, "pending_task_for_context"):
             task = repo.pending_task_for_context(message.chat_id, message.reply_to_message_id)
             if task is not None and hasattr(repo, "add_task_context_message"):
@@ -98,12 +100,12 @@ async def handle_incoming_message(
                 return
         match = match_message(message.chat_id, message.text, rules)
         if match is not None:
-            _record_keyword_hits(repo, message, match)
+            _record_keyword_hits(repo, message, match, keyword_configs)
         return
 
     match = match_message(message.chat_id, message.text, rules)
     if match is not None:
-        _record_keyword_hits(repo, message, match)
+        _record_keyword_hits(repo, message, match, keyword_configs)
 
     keyword_config = match_enabled_keyword(message.text, keyword_configs)
     if keyword_config is None:
@@ -119,6 +121,7 @@ async def handle_incoming_message(
     status = "pending"
     if hasattr(repo, "active_wait_for_reference") and repo.active_wait_for_reference(message.chat_id, root_message_id):
         status = "duplicate"
+    recipient_chat_ids = keyword_config.recipient_chat_ids if keyword_config.alert_enabled else []
     task = repo.create_monitor_task(
         task_type="wait",
         rule_id=match.rule.id,
@@ -132,17 +135,18 @@ async def handle_incoming_message(
         trigger_message_id=message.message_id,
         message_excerpt=message.text[:200],
         message_url=url,
-        recipient_chat_ids=keyword_config.recipient_chat_ids,
+        recipient_chat_ids=recipient_chat_ids,
         started_at=message.message_time,
         due_at=message.message_time + timedelta(minutes=WAIT_TIMEOUT_MINUTES),
         status=status,
     )
     if status == "duplicate":
         return
-    await queue.add_pending(
-        _pending_from_task(task, keyword_config.recipient_chat_ids),
-        due_at=now_timestamp + WAIT_TIMEOUT_MINUTES * 60,
-    )
+    if keyword_config.alert_enabled and recipient_chat_ids:
+        await queue.add_pending(
+            _pending_from_task(task, recipient_chat_ids),
+            due_at=now_timestamp + WAIT_TIMEOUT_MINUTES * 60,
+        )
 
 
 async def _create_followup_task(repo, queue, message: NormalizedTelegramMessage, wait_task: MonitorTask) -> None:
@@ -263,10 +267,14 @@ def _pending_from_task(task: MonitorTask, recipient_chat_ids: list[int]) -> Pend
     )
 
 
-def _record_keyword_hits(repo, message: NormalizedTelegramMessage, match) -> None:
+def _record_keyword_hits(repo, message: NormalizedTelegramMessage, match, configs) -> None:
     url = build_message_url(message.chat_id, message.message_id, message.chat_username)
+    config_map = {config.keyword: config for config in configs}
     for keyword in match.matched_keywords:
         if keyword not in FIXED_KEYWORDS:
+            continue
+        config = config_map.get(keyword)
+        if config is None or not config.stats_enabled:
             continue
         repo.record_keyword_hit(
             rule_id=match.rule.id,

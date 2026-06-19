@@ -30,6 +30,8 @@ DEFAULT_IGNORE_WORDS = {
     "妥",
 }
 
+COMPLETED_ACK_WORDS = {"1", "好的", "明白", "谢谢", "ok", "知道了"}
+
 
 def normalize_ignore_text(text: str) -> str:
     return "".join(str(text or "").lower().split()).strip("。.!！?？,，、")
@@ -39,3 +41,8 @@ def is_ignored_followup_text(text: str, ignore_words: set[str] | None = None) ->
     words = ignore_words or DEFAULT_IGNORE_WORDS
     normalized = normalize_ignore_text(text)
     return normalized in {normalize_ignore_text(word) for word in words}
+
+
+def is_completed_acknowledgement(text: str) -> bool:
+    normalized = normalize_ignore_text(text)
+    return normalized in {normalize_ignore_text(word) for word in COMPLETED_ACK_WORDS}

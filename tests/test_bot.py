@@ -160,13 +160,15 @@ async def test_keyword_message_records_hit_and_pending_task():
     assert queue.pending[0][1] == 1480
 
 
-async def test_keyword_with_alert_disabled_records_hit_without_task():
+async def test_task_enabled_alert_disabled_records_hit_and_creates_task_without_recipients():
     class NoAlertRepo(FakeRepo):
         def list_keyword_configs(self):
             return [
                 KeywordConfig(
                     keyword="请稍等elk",
                     enabled=True,
+                    stats_enabled=True,
+                    task_enabled=True,
                     alert_enabled=False,
                     recipient_chat_ids=[10001],
                 )
@@ -189,6 +191,77 @@ async def test_keyword_with_alert_disabled_records_hit_without_task():
     await handle_incoming_message(message, repo, queue, timeout_minutes=15, now_timestamp=1000)
 
     assert repo.hits[0]["matched_keyword"] == "请稍等elk"
+    assert repo.tasks[0].task_type == "wait"
+    assert repo.tasks[0].recipient_chat_ids == []
+    assert queue.pending == []
+
+
+async def test_stats_only_keyword_records_hit_without_task():
+    class StatsOnlyRepo(FakeRepo):
+        def list_keyword_configs(self):
+            return [
+                KeywordConfig(
+                    keyword="请稍等elk",
+                    enabled=True,
+                    stats_enabled=True,
+                    task_enabled=False,
+                    alert_enabled=False,
+                    recipient_chat_ids=[10001],
+                )
+            ]
+
+    repo = StatsOnlyRepo()
+    queue = FakeQueue()
+    message = NormalizedTelegramMessage(
+        chat_id="-1001",
+        chat_name="Ops",
+        chat_username="",
+        message_id=51,
+        sender_user_id=10001,
+        sender_username="elk",
+        text="请稍等elk",
+        message_time=datetime(2026, 6, 4, 13, 11, 25, tzinfo=timezone.utc),
+        reply_to_message_id=None,
+    )
+
+    await handle_incoming_message(message, repo, queue, timeout_minutes=15, now_timestamp=1000)
+
+    assert repo.hits[0]["matched_keyword"] == "请稍等elk"
+    assert repo.tasks == []
+    assert queue.pending == []
+
+
+async def test_all_keyword_layers_disabled_does_nothing():
+    class DisabledRepo(FakeRepo):
+        def list_keyword_configs(self):
+            return [
+                KeywordConfig(
+                    keyword="请稍等elk",
+                    enabled=False,
+                    stats_enabled=False,
+                    task_enabled=False,
+                    alert_enabled=False,
+                    recipient_chat_ids=[],
+                )
+            ]
+
+    repo = DisabledRepo()
+    queue = FakeQueue()
+    message = NormalizedTelegramMessage(
+        chat_id="-1001",
+        chat_name="Ops",
+        chat_username="",
+        message_id=52,
+        sender_user_id=10001,
+        sender_username="elk",
+        text="请稍等elk",
+        message_time=datetime(2026, 6, 4, 13, 11, 25, tzinfo=timezone.utc),
+        reply_to_message_id=None,
+    )
+
+    await handle_incoming_message(message, repo, queue, timeout_minutes=15, now_timestamp=1000)
+
+    assert repo.hits == []
     assert repo.tasks == []
     assert queue.pending == []
 
@@ -324,6 +397,92 @@ async def test_ignored_customer_requote_does_not_create_followup_task():
 
     assert len(repo.tasks) == 1
     assert queue.pending[-1][0].task_type == "wait"
+
+
+async def test_completed_task_unreferenced_customer_ack_does_not_create_any_task():
+    repo = FakeRepo()
+    queue = FakeQueue()
+    await handle_incoming_message(
+        NormalizedTelegramMessage(
+            chat_id="-1001",
+            chat_name="Ops",
+            chat_username="",
+            message_id=50,
+            sender_user_id=10001,
+            sender_username="elk",
+            text="请稍等elk",
+            message_time=datetime(2026, 6, 4, 13, 11, 25, tzinfo=timezone.utc),
+            reply_to_message_id=40,
+        ),
+        repo,
+        queue,
+        timeout_minutes=15,
+        now_timestamp=1000,
+    )
+    repo.complete_tasks_referencing("-1001", 50, datetime(2026, 6, 4, 13, 12, 25, tzinfo=timezone.utc))
+
+    await handle_incoming_message(
+        NormalizedTelegramMessage(
+            chat_id="-1001",
+            chat_name="Ops",
+            chat_username="",
+            message_id=61,
+            sender_user_id=20001,
+            sender_username="customer",
+            text="知道了",
+            message_time=datetime(2026, 6, 4, 13, 20, 25, tzinfo=timezone.utc),
+            reply_to_message_id=None,
+        ),
+        repo,
+        queue,
+        timeout_minutes=15,
+        now_timestamp=1540,
+    )
+
+    assert len(repo.tasks) == 1
+    assert repo.tasks[0].status == "completed"
+
+
+async def test_text_containing_ack_characters_is_not_suppressed():
+    repo = FakeRepo()
+    queue = FakeQueue()
+    await handle_incoming_message(
+        NormalizedTelegramMessage(
+            chat_id="-1001",
+            chat_name="Ops",
+            chat_username="",
+            message_id=80,
+            sender_user_id=10001,
+            sender_username="elk",
+            text="我看一下",
+            message_time=datetime(2026, 6, 4, 13, 11, 25, tzinfo=timezone.utc),
+            reply_to_message_id=None,
+        ),
+        repo,
+        queue,
+        timeout_minutes=15,
+        now_timestamp=1000,
+    )
+
+    await handle_incoming_message(
+        NormalizedTelegramMessage(
+            chat_id="-1001",
+            chat_name="Ops",
+            chat_username="",
+            message_id=81,
+            sender_user_id=20001,
+            sender_username="customer",
+            text="token1异常",
+            message_time=datetime(2026, 6, 4, 13, 12, 25, tzinfo=timezone.utc),
+            reply_to_message_id=80,
+        ),
+        repo,
+        queue,
+        timeout_minutes=15,
+        now_timestamp=1060,
+    )
+
+    assert repo.tasks[-1].task_type == "reply"
 
 
 async def test_customer_reply_to_staff_message_creates_reply_task():
