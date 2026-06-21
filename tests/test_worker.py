@@ -399,3 +399,40 @@ async def test_due_severe_alert_sends_once_and_recovers_from_sqlite(fake_redis):
 
     assert sender.severe_sent == [(10001, 92, 10)]
     assert repo.severe_alerted[0][0] == 901
+
+
+async def test_failed_severe_alert_can_retry(fake_redis):
+    class RetryableSevereSender(FakeAlertSender):
+        def __init__(self):
+            super().__init__()
+            self.fail = True
+
+        async def send_severe_timeout_alert(self, staff, pending, overdue_minutes):
+            self.severe_sent.append((staff.telegram_user_id, pending.message_id, overdue_minutes))
+            return {"status": "failed" if self.fail else "sent", "error_message": ""}
+
+    queue = RedisQueue(fake_redis)
+    task = MonitorTask(
+        id=902, task_type="reply", status="alerted", rule_id=1,
+        chat_id="-1001", chat_name="Ops", keyword="漏回",
+        staff_user_id=20001, staff_username="customer", root_message_id=93,
+        wait_message_id=93, trigger_message_id=93, message_excerpt="查询",
+        message_url="https://t.me/c/1001/93", recipient_chat_ids=[10001],
+        started_at=datetime.fromtimestamp(700, tz=timezone.utc),
+        due_at=datetime.fromtimestamp(1000, tz=timezone.utc),
+        first_alert_sent_at=datetime.fromtimestamp(1000, tz=timezone.utc),
+        severe_due_at=datetime.fromtimestamp(1600, tz=timezone.utc),
+    )
+    repo = FakeTaskRepository()
+    repo.tasks[902] = task
+    repo.severe_due_tasks = [task]
+    sender = RetryableSevereSender()
+    rule = MonitorRule(id=1, chat_id="-1001", chat_name="Ops", enabled=True)
+    worker = TimeoutWorker(queue, sender, lambda: [rule], task_repository=repo, timeout_minutes=8)
+
+    await worker.run_once(1600)
+    sender.fail = False
+    await worker.run_once(1601)
+
+    assert sender.severe_sent == [(10001, 93, 10), (10001, 93, 10)]
+    assert repo.severe_alerted == [(902, datetime.fromtimestamp(1601, tz=timezone.utc))]

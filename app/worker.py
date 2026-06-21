@@ -166,7 +166,9 @@ class TimeoutWorker:
                     pass
             if delivered and hasattr(self.task_repository, "mark_severe_alert_sent"):
                 self.task_repository.mark_severe_alert_sent(task_id, now)
-            await self.queue.remove_severe_member(member)
+                await self.queue.remove_severe_member(member)
+            elif not delivered:
+                await self.queue.clear_severe_alerted(task_id)
 
     def _task_is_still_pending(self, task_id: int) -> bool:
         if self.task_repository is None or not hasattr(self.task_repository, "get_monitor_task"):

@@ -97,3 +97,6 @@ class RedisQueue:
 
     async def mark_severe_alerted(self, task_id: int) -> bool:
         return bool(await self.redis.set(self.severe_alerted_key(task_id), "1", nx=True))
+
+    async def clear_severe_alerted(self, task_id: int) -> None:
+        await self.redis.delete(self.severe_alerted_key(task_id))
