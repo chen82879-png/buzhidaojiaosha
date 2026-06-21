@@ -93,6 +93,25 @@ def test_keyword_statistics_enabled_is_independent_from_alert_recipients(tmp_pat
     assert stats["请稍等elk"]["recipient_chat_ids"] == ""
 
 
+def test_keyword_statistics_scans_keyword_hits_once(tmp_path):
+    db_path = tmp_path / "app.sqlite3"
+    conn = connect(str(db_path))
+    migrate(conn)
+    repo = Repository(conn)
+    statements = []
+    conn.set_trace_callback(statements.append)
+
+    repo.keyword_statistics(now=datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc))
+
+    hit_scans = [
+        statement
+        for statement in statements
+        if statement.lstrip().upper().startswith("SELECT")
+        and "FROM keyword_hits kh" in statement
+    ]
+    assert len(hit_scans) == 1
+
+
 def test_keyword_statistics_today_uses_beijing_calendar_day(tmp_path):
     db_path = tmp_path / "app.sqlite3"
     conn = connect(str(db_path))

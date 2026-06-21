@@ -272,36 +272,39 @@ class Repository:
             (today, seven_day_start, detail_cutoff_date),
         ).fetchall()
         by_keyword = {row["matched_keyword"]: dict(row) for row in rollup_rows}
+        detail_rows = self.conn.execute(
+            """
+            SELECT
+                kh.matched_keyword,
+                SUM(CASE WHEN date(datetime(kh.message_time), '+8 hours') = ? THEN 1 ELSE 0 END) AS today_count,
+                SUM(CASE WHEN date(datetime(kh.message_time), '+8 hours') >= ? THEN 1 ELSE 0 END) AS seven_day_count
+            FROM keyword_hits kh
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM monitor_tasks mt
+                WHERE mt.chat_id = kh.chat_id
+                  AND mt.wait_message_id = kh.message_id
+                  AND mt.task_type = 'wait'
+                  AND mt.status = 'deleted'
+            )
+            GROUP BY kh.matched_keyword
+            """,
+            (today, seven_day_start),
+        ).fetchall()
+        detail_by_keyword = {row["matched_keyword"]: dict(row) for row in detail_rows}
         configs = {config.keyword: config for config in self.list_keyword_configs()}
         stats: list[dict[str, object]] = []
         for keyword in FIXED_KEYWORDS:
             row = by_keyword.get(keyword, {})
-            detail = self.conn.execute(
-                """
-                SELECT
-                    SUM(CASE WHEN date(datetime(kh.message_time), '+8 hours') = ? THEN 1 ELSE 0 END) AS today_count,
-                    SUM(CASE WHEN date(datetime(kh.message_time), '+8 hours') >= ? THEN 1 ELSE 0 END) AS seven_day_count
-                FROM keyword_hits kh
-                WHERE kh.matched_keyword = ?
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM monitor_tasks mt
-                    WHERE mt.chat_id = kh.chat_id
-                      AND mt.wait_message_id = kh.message_id
-                      AND mt.task_type = 'wait'
-                      AND mt.status = 'deleted'
-                  )
-                """,
-                (today, seven_day_start, keyword),
-            ).fetchone()
+            detail = detail_by_keyword.get(keyword, {})
             config = configs[keyword]
             stats.append(
                 {
                     "keyword": keyword,
                     "enabled": config.enabled,
                     "recipient_chat_ids": ", ".join(str(chat_id) for chat_id in config.recipient_chat_ids),
-                    "today_count": int(row.get("today_count") or 0) + int(detail["today_count"] or 0),
-                    "seven_day_count": int(row.get("seven_day_count") or 0) + int(detail["seven_day_count"] or 0),
+                    "today_count": int(row.get("today_count") or 0) + int(detail.get("today_count") or 0),
+                    "seven_day_count": int(row.get("seven_day_count") or 0) + int(detail.get("seven_day_count") or 0),
                 }
             )
         return stats
