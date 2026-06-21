@@ -5,6 +5,16 @@ from app.models import KeywordConfig
 from app.repositories import Repository
 
 
+def test_migrate_adds_deleted_wait_lookup_index(tmp_path):
+    db_path = tmp_path / "app.sqlite3"
+    conn = connect(str(db_path))
+
+    migrate(conn)
+
+    indexes = {row["name"] for row in conn.execute("PRAGMA index_list(monitor_tasks)").fetchall()}
+    assert "idx_monitor_tasks_deleted_wait_lookup" in indexes
+
+
 def test_migrate_creates_rule_keyword_staff_and_hit_records(tmp_path):
     db_path = tmp_path / "app.sqlite3"
     conn = connect(str(db_path))

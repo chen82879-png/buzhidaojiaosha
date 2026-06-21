@@ -138,6 +138,8 @@ def migrate(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (task_id, message_id)
         );
+        CREATE INDEX IF NOT EXISTS idx_monitor_tasks_deleted_wait_lookup
+            ON monitor_tasks(chat_id, wait_message_id, task_type, status);
         """
     )
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(keyword_configs)").fetchall()}
