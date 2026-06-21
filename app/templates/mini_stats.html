@@ -46,37 +46,12 @@
       <div class="mini-stats-numbers">
         <div><span>今日</span><strong>{{ keyword.today_count }}</strong></div>
         <div><span>7 日</span><strong>{{ keyword.seven_day_count }}</strong></div>
-        <div><span>累计</span><strong>{{ keyword.total_count }}</strong></div>
       </div>
-      {% if keyword.latest_chat_name %}
-      <p class="mini-card-meta">最近：{{ keyword.latest_chat_name }} · {{ keyword.latest_label }}</p>
-      {% endif %}
     </article>
     {% else %}
     <div class="mini-empty-state">
       <strong>暂无关键词统计</strong>
       <span>关键词命中后会生成统计。</span>
-    </div>
-    {% endfor %}
-  </div>
-</section>
-
-<section class="mini-section">
-  <h2>最近审计</h2>
-  <div class="mini-card-list">
-    {% for record in stats.audit_records %}
-    <article class="mini-audit-card">
-      <strong>{{ record.matched_keyword }}</strong>
-      <p class="mini-card-meta">{{ record.chat_name }} · {{ record.created_at }}</p>
-      <p class="mini-card-text">{{ record.message_excerpt }}</p>
-      {% if record.message_url %}
-      <a class="mini-text-link" href="{{ record.message_url }}">查看消息</a>
-      {% endif %}
-    </article>
-    {% else %}
-    <div class="mini-empty-state">
-      <strong>暂无审计记录</strong>
-      <span>命中记录会保存在这里。</span>
     </div>
     {% endfor %}
   </div>

@@ -73,7 +73,10 @@ def test_keyword_rollup_preserves_seven_day_stats_after_detail_cleanup(tmp_path)
     assert detail_count == 1
     assert stats["请稍等elk"]["seven_day_count"] == 2
     assert stats["请稍等elk"]["today_count"] == 0
-    assert stats["请稍等elk"]["latest_message_url"] == "https://t.me/c/1571955528/101"
+    assert "total_count" not in stats["请稍等elk"]
+    assert "latest_time" not in stats["请稍等elk"]
+    assert "latest_chat_name" not in stats["请稍等elk"]
+    assert "latest_message_url" not in stats["请稍等elk"]
 
 
 def test_keyword_statistics_enabled_is_independent_from_alert_recipients(tmp_path):
@@ -171,7 +174,7 @@ def test_keyword_statistics_excludes_deleted_wait_tasks(tmp_path):
 
     assert stats["请稍等elk"]["today_count"] == 0
     assert stats["请稍等elk"]["seven_day_count"] == 0
-    assert stats["请稍等elk"]["total_count"] == 0
+    assert "total_count" not in stats["请稍等elk"]
 
 
 def test_marks_stale_overdue_pending_tasks_alerted(tmp_path):

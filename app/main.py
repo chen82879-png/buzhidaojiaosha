@@ -171,22 +171,11 @@ def build_mini_keyword_rows(repo) -> list[dict[str, object]]:
 
 
 def build_mini_stats(repo, now: datetime) -> dict[str, object]:
-    rows = repo.keyword_statistics(now=now) if hasattr(repo, "keyword_statistics") else []
-    keyword_rows = []
-    for row in rows:
-        keyword_rows.append(
-            {
-                **row,
-                "latest_label": format_local_datetime(row.get("latest_time")),
-            }
-        )
+    keyword_rows = repo.keyword_statistics(now=now) if hasattr(repo, "keyword_statistics") else []
     open_tasks = repo.list_open_tasks() if hasattr(repo, "list_open_tasks") else []
-    audit_records = repo.recent_audit_records(limit=5) if hasattr(repo, "recent_audit_records") else []
-    history_check = repo.history_check_summary(limit=5, now=now) if hasattr(repo, "history_check_summary") else {}
     return {
         "today_count": sum(int(row.get("today_count") or 0) for row in keyword_rows),
         "seven_day_count": sum(int(row.get("seven_day_count") or 0) for row in keyword_rows),
-        "total_count": sum(int(row.get("total_count") or 0) for row in keyword_rows),
         "enabled_count": sum(1 for row in keyword_rows if row.get("enabled")),
         "open_task_count": sum(
             1
@@ -194,8 +183,6 @@ def build_mini_stats(repo, now: datetime) -> dict[str, object]:
             if getattr(task, "task_type", "") in {"wait", "followup", "reply", "self_reply"}
         ),
         "keywords": keyword_rows,
-        "audit_records": audit_records,
-        "history_check": history_check,
     }
 
 

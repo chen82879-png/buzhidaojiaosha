@@ -263,7 +263,6 @@ class Repository:
             """
             SELECT
                 matched_keyword,
-                SUM(count) AS total_count,
                 SUM(CASE WHEN stat_date = ? THEN count ELSE 0 END) AS today_count,
                 SUM(CASE WHEN stat_date >= ? THEN count ELSE 0 END) AS seven_day_count
             FROM keyword_daily_stats
@@ -280,7 +279,6 @@ class Repository:
             detail = self.conn.execute(
                 """
                 SELECT
-                    COUNT(*) AS total_count,
                     SUM(CASE WHEN date(datetime(kh.message_time), '+8 hours') = ? THEN 1 ELSE 0 END) AS today_count,
                     SUM(CASE WHEN date(datetime(kh.message_time), '+8 hours') >= ? THEN 1 ELSE 0 END) AS seven_day_count
                 FROM keyword_hits kh
@@ -296,24 +294,6 @@ class Repository:
                 """,
                 (today, seven_day_start, keyword),
             ).fetchone()
-            latest = self.conn.execute(
-                """
-                SELECT kh.chat_name, kh.message_url, kh.message_time
-                FROM keyword_hits kh
-                WHERE kh.matched_keyword = ?
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM monitor_tasks mt
-                    WHERE mt.chat_id = kh.chat_id
-                      AND mt.wait_message_id = kh.message_id
-                      AND mt.task_type = 'wait'
-                      AND mt.status = 'deleted'
-                  )
-                ORDER BY kh.message_time DESC, kh.id DESC
-                LIMIT 1
-                """,
-                (keyword,),
-            ).fetchone()
             config = configs[keyword]
             stats.append(
                 {
@@ -322,10 +302,6 @@ class Repository:
                     "recipient_chat_ids": ", ".join(str(chat_id) for chat_id in config.recipient_chat_ids),
                     "today_count": int(row.get("today_count") or 0) + int(detail["today_count"] or 0),
                     "seven_day_count": int(row.get("seven_day_count") or 0) + int(detail["seven_day_count"] or 0),
-                    "total_count": int(row.get("total_count") or 0) + int(detail["total_count"] or 0),
-                    "latest_time": latest["message_time"] if latest else "",
-                    "latest_chat_name": latest["chat_name"] if latest else "",
-                    "latest_message_url": latest["message_url"] if latest else "",
                 }
             )
         return stats

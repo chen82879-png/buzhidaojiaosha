@@ -250,7 +250,7 @@ def test_mini_keywords_page_hides_configured_groups():
     assert "-1001571955528" not in response.text
 
 
-def test_mini_stats_page_displays_keyword_statistics_and_audit():
+def test_mini_stats_page_displays_keyword_statistics_without_audit_or_totals():
     class Repo:
         def keyword_statistics(self, now=None):
             return [
@@ -260,10 +260,6 @@ def test_mini_stats_page_displays_keyword_statistics_and_audit():
                     "recipient_chat_ids": "5317794797",
                     "today_count": 35,
                     "seven_day_count": 42,
-                    "total_count": 88,
-                    "latest_time": "2026-06-13T12:44:06+00:00",
-                    "latest_chat_name": "9-YY-WH2对接",
-                    "latest_message_url": "https://t.me/c/1001/50",
                 }
             ]
 
@@ -271,15 +267,10 @@ def test_mini_stats_page_displays_keyword_statistics_and_audit():
             return [SimpleNamespace(task_type="wait")]
 
         def recent_audit_records(self, limit=5):
-            return [
-                {
-                    "matched_keyword": "请稍等～yu",
-                    "chat_name": "9-YY-WH2对接",
-                    "message_excerpt": "请稍等～yu，我查一下",
-                    "created_at": "2026-06-13T12:44:06+00:00",
-                    "message_url": "https://t.me/c/1001/50",
-                }
-            ]
+            raise AssertionError("statistics page must not query recent audit records")
+
+        def history_check_summary(self, limit=5, now=None):
+            raise AssertionError("statistics page must not query history checks")
 
     client = TestClient(create_app(repo=Repo()))
     response = client.get("/mini/stats")
@@ -293,8 +284,9 @@ def test_mini_stats_page_displays_keyword_statistics_and_audit():
     assert "历史检测" in response.text
     assert "今日闭环" not in response.text
     assert "今日异常" not in response.text
-    assert "最近审计" in response.text
-    assert "请稍等～yu，我查一下" in response.text
+    assert "累计" not in response.text
+    assert "最近审计" not in response.text
+    assert "请稍等～yu，我查一下" not in response.text
 
 
 def test_mini_history_page_displays_closed_loop_and_anomalies():
