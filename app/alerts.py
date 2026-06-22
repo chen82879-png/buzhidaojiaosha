@@ -1,4 +1,9 @@
+import logging
+
 from app.models import PendingMessage, RuleStaff
+
+
+logger = logging.getLogger(__name__)
 
 
 def render_timeout_alert(
@@ -17,7 +22,7 @@ def render_timeout_alert(
     }
     reason_map = {
         "wait": "客服发送稍等后，后续未发现有效引用回复",
-        "followup": "客户再次引用已完成稍等消息后，未发现客服跟进",
+        "followup": "客服回复继续处理后，未发现后续有效引用回复",
         "reply": "客户引用客服消息咨询后，未发现客服继续处理",
         "self_reply": "客户在待处理链路中追加消息后，未发现客服处理",
     }
@@ -73,6 +78,7 @@ class TelegramAlertSender:
             await self.bot.send_message(chat_id=staff.telegram_user_id, text=text)
             return {"status": "sent", "error_message": ""}
         except Exception as exc:
+            logger.warning("telegram timeout alert failed: %s", exc)
             return {"status": "failed", "error_message": str(exc)}
 
     async def send_severe_timeout_alert(
@@ -86,4 +92,5 @@ class TelegramAlertSender:
             await self.bot.send_message(chat_id=staff.telegram_user_id, text=text)
             return {"status": "sent", "error_message": ""}
         except Exception as exc:
+            logger.warning("telegram severe alert failed: %s", exc)
             return {"status": "failed", "error_message": str(exc)}

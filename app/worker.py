@@ -4,13 +4,14 @@ from datetime import datetime, timedelta, timezone
 
 from app.models import MonitorRule, MonitorTask, PendingMessage, RuleStaff
 from app.redis_queue import RedisQueue
+from app.alert_rules import SEVERE_WAIT_DELAY_MINUTES
 
 TASK_TIMEOUT_MINUTES = {
     "followup": 15,
     "reply": 5,
     "self_reply": 3,
 }
-SEVERE_ALERT_DELAY_MINUTES = 10
+SEVERE_ALERT_DELAY_MINUTES = SEVERE_WAIT_DELAY_MINUTES
 
 
 class TimeoutWorker:
@@ -104,6 +105,12 @@ class TimeoutWorker:
             self.task_repository, "mark_first_alert_sent"
         ):
             return
+        try:
+            task = self.task_repository.get_monitor_task(task_id)
+        except (AttributeError, KeyError):
+            return
+        if task.task_type != "wait":
+            return
         severe_due_at = alerted_at + timedelta(minutes=SEVERE_ALERT_DELAY_MINUTES)
         self.task_repository.mark_first_alert_sent(task_id, alerted_at, severe_due_at)
         await self.queue.add_severe(task_id, severe_due_at.timestamp())
@@ -164,11 +171,9 @@ class TimeoutWorker:
                     delivered = delivered or result.get("status") == "sent"
                 except TimeoutError:
                     pass
-            if delivered and hasattr(self.task_repository, "mark_severe_alert_sent"):
+            if hasattr(self.task_repository, "mark_severe_alert_sent"):
                 self.task_repository.mark_severe_alert_sent(task_id, now)
-                await self.queue.remove_severe_member(member)
-            elif not delivered:
-                await self.queue.clear_severe_alerted(task_id)
+            await self.queue.remove_severe_member(member)
 
     def _task_is_still_pending(self, task_id: int) -> bool:
         if self.task_repository is None or not hasattr(self.task_repository, "get_monitor_task"):

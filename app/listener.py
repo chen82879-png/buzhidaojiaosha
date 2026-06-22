@@ -12,6 +12,7 @@ from app.poller import cleanup_deleted_wait_tasks
 from app.redis_queue import RedisQueue
 from app.repositories import Repository
 from app.staff_identity import StaffIdentity
+from app.work_mode import WorkModeController
 
 
 def normalize_telethon_message(message) -> NormalizedTelegramMessage | None:
@@ -54,8 +55,20 @@ async def run_listener(settings: Settings | None = None) -> None:
     client = TelegramClient(settings.telethon_session_path, settings.telegram_api_id, settings.telegram_api_hash)
     staff_identity = StaffIdentity.source_defaults(extra_ids=settings.other_cs_ids)
 
+    async def clear_runtime() -> None:
+        repo.clear_active_runtime_tasks()
+        await queue.clear_runtime()
+
+    work_mode = WorkModeController(clear_runtime=clear_runtime)
+    listener_user_id = 0
+
     @client.on(events.NewMessage)
     async def on_new_message(event):
+        if int(getattr(event, "chat_id", 0) or 0) == listener_user_id:
+            response = await work_mode.handle_command(getattr(event.message, "text", ""))
+            if response is not None:
+                await event.reply(response)
+                return
         normalized = normalize_telethon_message(event.message)
         if normalized is None:
             return
@@ -66,6 +79,8 @@ async def run_listener(settings: Settings | None = None) -> None:
             settings.global_timeout_minutes,
             time.time(),
             staff_identity=staff_identity,
+            keep_keywords=settings.keep_keywords,
+            work_mode=work_mode,
         )
 
     @client.on(events.MessageEdited)
@@ -88,6 +103,8 @@ async def run_listener(settings: Settings | None = None) -> None:
             settings.global_timeout_minutes,
             time.time(),
             staff_identity=staff_identity,
+            keep_keywords=settings.keep_keywords,
+            work_mode=work_mode,
         )
 
     async def message_deleted(chat_id: str, message_id: int) -> bool:
@@ -104,8 +121,9 @@ async def run_listener(settings: Settings | None = None) -> None:
 
     await client.start(phone=settings.listener_phone)
     me = await client.get_me()
+    listener_user_id = int(getattr(me, "id", 0) or 0)
     staff_identity = StaffIdentity.source_defaults(
-        listener_user_id=int(getattr(me, "id", 0) or 0),
+        listener_user_id=listener_user_id,
         extra_ids=settings.other_cs_ids,
     )
     await configure_monitor_groups_from_dialogs(repo, client)

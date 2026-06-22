@@ -93,3 +93,6 @@ class MessageSnapshot:
     text: str
     message_time: datetime
     reply_to_message_id: int | None = None
+    sender_display_name: str = ""
+    media_group_id: int | None = None
+    message_kind: str = "text"

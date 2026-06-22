@@ -98,10 +98,13 @@ def migrate(conn: sqlite3.Connection) -> None:
             message_id INTEGER NOT NULL,
             sender_user_id INTEGER NOT NULL,
             sender_username TEXT NOT NULL DEFAULT '',
+            sender_display_name TEXT NOT NULL DEFAULT '',
             is_staff INTEGER NOT NULL DEFAULT 0,
             text TEXT NOT NULL DEFAULT '',
             message_time TEXT NOT NULL,
             reply_to_message_id INTEGER,
+            media_group_id INTEGER,
+            message_kind TEXT NOT NULL DEFAULT 'text',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (chat_id, message_id)
@@ -158,4 +161,17 @@ def migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE monitor_tasks ADD COLUMN severe_due_at TEXT")
     if "severe_alert_sent_at" not in task_columns:
         conn.execute("ALTER TABLE monitor_tasks ADD COLUMN severe_alert_sent_at TEXT")
+    snapshot_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(message_snapshots)").fetchall()
+    }
+    if "sender_display_name" not in snapshot_columns:
+        conn.execute("ALTER TABLE message_snapshots ADD COLUMN sender_display_name TEXT NOT NULL DEFAULT ''")
+    if "media_group_id" not in snapshot_columns:
+        conn.execute("ALTER TABLE message_snapshots ADD COLUMN media_group_id INTEGER")
+    if "message_kind" not in snapshot_columns:
+        conn.execute("ALTER TABLE message_snapshots ADD COLUMN message_kind TEXT NOT NULL DEFAULT 'text'")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_message_snapshots_media_group "
+        "ON message_snapshots(chat_id, media_group_id)"
+    )
     conn.commit()

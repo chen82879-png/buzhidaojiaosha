@@ -42,7 +42,7 @@ def load_settings() -> Settings:
         listener_phone=os.getenv("LISTENER_PHONE", ""),
         telethon_session_path=os.getenv("TELETHON_SESSION_PATH", "./data/listener.session"),
         other_cs_ids=tuple(int(value) for value in _split_values(os.getenv("OTHER_CS_IDS", ""))),
-        keep_keywords=_split_values(os.getenv("KEEP_KEYWORDS", "")),
+        keep_keywords=_split_values(os.getenv("KEEP_KEYWORDS", "核实中|处理中|还没好")),
         ignore_keywords=_split_values(os.getenv("IGNORE_KEYWORDS", ""), (",",)),
         gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),

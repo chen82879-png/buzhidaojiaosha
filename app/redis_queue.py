@@ -100,3 +100,16 @@ class RedisQueue:
 
     async def clear_severe_alerted(self, task_id: int) -> None:
         await self.redis.delete(self.severe_alerted_key(task_id))
+
+    async def clear_runtime(self) -> None:
+        normal_members = await self.redis.zrangebyscore("timeout_queue", 0, float("inf"))
+        severe_members = await self.redis.zrangebyscore("severe_timeout_queue", 0, float("inf"))
+        task_ids = {int(member) for member in [*normal_members, *severe_members]}
+        for task_id in task_ids:
+            await self.redis.delete(self.pending_key(task_id))
+            await self.redis.delete(self.alerted_key(task_id))
+            await self.redis.delete(self.severe_alerted_key(task_id))
+        if normal_members:
+            await self.redis.zrem("timeout_queue", *normal_members)
+        if severe_members:
+            await self.redis.zrem("severe_timeout_queue", *severe_members)

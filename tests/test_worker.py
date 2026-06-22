@@ -401,7 +401,7 @@ async def test_due_severe_alert_sends_once_and_recovers_from_sqlite(fake_redis):
     assert repo.severe_alerted[0][0] == 901
 
 
-async def test_failed_severe_alert_can_retry(fake_redis):
+async def test_failed_severe_alert_is_not_retried(fake_redis):
     class RetryableSevereSender(FakeAlertSender):
         def __init__(self):
             super().__init__()
@@ -413,8 +413,8 @@ async def test_failed_severe_alert_can_retry(fake_redis):
 
     queue = RedisQueue(fake_redis)
     task = MonitorTask(
-        id=902, task_type="reply", status="alerted", rule_id=1,
-        chat_id="-1001", chat_name="Ops", keyword="漏回",
+        id=902, task_type="wait", status="alerted", rule_id=1,
+        chat_id="-1001", chat_name="Ops", keyword="请稍等elk",
         staff_user_id=20001, staff_username="customer", root_message_id=93,
         wait_message_id=93, trigger_message_id=93, message_excerpt="查询",
         message_url="https://t.me/c/1001/93", recipient_chat_ids=[10001],
@@ -434,5 +434,5 @@ async def test_failed_severe_alert_can_retry(fake_redis):
     sender.fail = False
     await worker.run_once(1601)
 
-    assert sender.severe_sent == [(10001, 93, 10), (10001, 93, 10)]
-    assert repo.severe_alerted == [(902, datetime.fromtimestamp(1601, tz=timezone.utc))]
+    assert sender.severe_sent == [(10001, 93, 10)]
+    assert repo.severe_alerted == [(902, datetime.fromtimestamp(1600, tz=timezone.utc))]

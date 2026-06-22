@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Bot
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from redis import asyncio as redis_async
@@ -19,12 +19,14 @@ from app.bot import FOLLOWUP_TIMEOUT_MINUTES, WAIT_TIMEOUT_MINUTES, NormalizedTe
 from app.config import Settings, load_settings
 from app.db import connect, migrate
 from app.alerts import TelegramAlertSender
+from app.ai_audit import GeminiClient, HistoricalAuditor, LOOKBACK_HOURS
 from app.fixed_keywords import FIXED_KEYWORDS
 from app.monitor_groups import DEFAULT_MONITOR_GROUP_NAMES
 from app.models import KeywordConfig
 from app.redis_queue import RedisQueue
 from app.repositories import Repository
 from app.session_bootstrap import restore_session_from_env
+from app.staff_identity import StaffIdentity
 from app.worker import TimeoutWorker
 
 
@@ -66,6 +68,10 @@ def normalize_telegram_update(payload: dict) -> NormalizedTelegramMessage | None
         text=text,
         message_time=datetime.fromtimestamp(int(raw_message.get("date", time.time())), tz=timezone.utc),
         reply_to_message_id=reply.get("message_id"),
+        media_group_id=raw_message.get("media_group_id"),
+        message_kind="media" if any(
+            key in raw_message for key in ("photo", "video", "document", "sticker", "animation")
+        ) else "text",
     )
 
 
@@ -215,6 +221,7 @@ def create_app(
     app.state.timeout_worker_task = None
     app.state.listener_task = None
     app.state.maintenance_task = None
+    app.state.latest_ai_audit = None
     app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
     async def timeout_worker_loop() -> None:
@@ -255,6 +262,10 @@ def create_app(
 
     @app.on_event("startup")
     async def start_timeout_worker() -> None:
+        if hasattr(repo, "clear_active_runtime_tasks"):
+            repo.clear_active_runtime_tasks()
+        if hasattr(queue, "clear_runtime"):
+            await queue.clear_runtime()
         if app.state.timeout_worker_enabled:
             app.state.timeout_worker_task = asyncio.create_task(timeout_worker_loop())
         if app.state.listener_enabled:
@@ -355,6 +366,8 @@ def create_app(
                 "title": "历史检测",
                 "active_tab": "history",
                 "history": history,
+                "ai_audit": app.state.latest_ai_audit,
+                "gemini_configured": bool(getattr(settings, "gemini_api_key", "")),
             },
         )
 
@@ -390,7 +403,17 @@ def create_app(
         payload = await request.json()
         message = normalize_telegram_update(payload)
         if message is not None:
-            await message_handler(message, repo, queue, settings.global_timeout_minutes, time.time())
+            kwargs = {}
+            if message_handler is handle_incoming_message:
+                kwargs = {
+                    "staff_identity": StaffIdentity.source_defaults(
+                        extra_ids=getattr(settings, "other_cs_ids", ())
+                    ),
+                    "keep_keywords": getattr(settings, "keep_keywords", ()),
+                }
+            await message_handler(
+                message, repo, queue, settings.global_timeout_minutes, time.time(), **kwargs
+            )
         return {"ok": True}
 
     @app.get("/api/audit/recent")
@@ -414,6 +437,23 @@ def create_app(
         summary = repo.history_check_summary(limit=20, now=now_provider()) if hasattr(repo, "history_check_summary") else {}
         return {"summary": summary}
 
+    @app.post("/api/history/ai/{mode}")
+    async def api_history_ai(mode: str):
+        if mode not in LOOKBACK_HOURS:
+            return JSONResponse({"ok": False, "error": "unsupported audit mode"}, status_code=400)
+        if not hasattr(repo, "list_message_snapshots_since"):
+            return JSONResponse({"ok": False, "error": "snapshot audit unavailable"}, status_code=503)
+        auditor = HistoricalAuditor(
+            repo,
+            GeminiClient(
+                getattr(settings, "gemini_api_key", ""),
+                getattr(settings, "gemini_model", "gemini-3.5-flash"),
+            ),
+        )
+        result = await auditor.run(mode, now_provider())
+        app.state.latest_ai_audit = result
+        return {"ok": True, "audit": result}
+
     @app.get("/api/config/status")
     async def api_config_status():
         status = summarize_status(repo, settings)
@@ -433,6 +473,7 @@ def create_app(
             "enabled_chats": enabled_chats,
             "keyword_count": status["keyword_count"],
             "open_task_count": status["open_task_count"],
+            "gemini_configured": bool(getattr(settings, "gemini_api_key", "")),
         }
 
     @app.post("/api/config/configure-groups")

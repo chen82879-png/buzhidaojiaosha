@@ -42,3 +42,24 @@ async def test_add_and_close_severe_queue_member(fake_redis):
     assert await queue.due_severe_members(1600) == ["20"]
     await queue.close_pending(20)
     assert await queue.due_severe_members(1600) == []
+
+
+async def test_clear_runtime_removes_all_timeout_state(fake_redis):
+    queue = RedisQueue(fake_redis)
+    pending = PendingMessage(
+        task_id=21, task_type="wait", rule_id=1, chat_id="-1001", chat_name="Ops",
+        message_id=50, message_time=datetime.now(timezone.utc), matched_keywords=["请稍等elk"],
+        message_excerpt="请稍等elk", message_url="https://t.me/c/1/50",
+    )
+    await queue.add_pending(pending, due_at=1000)
+    await queue.add_severe(21, due_at=1600)
+    await queue.mark_alerted(21)
+    await queue.mark_severe_alerted(21)
+
+    await queue.clear_runtime()
+
+    assert await queue.get_pending(21) is None
+    assert await queue.due_members(float("inf")) == []
+    assert await queue.due_severe_members(float("inf")) == []
+    assert await queue.mark_alerted(21) is True
+    assert await queue.mark_severe_alerted(21) is True

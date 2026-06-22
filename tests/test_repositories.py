@@ -234,6 +234,30 @@ def test_marks_stale_overdue_pending_tasks_alerted(tmp_path):
     repo.mark_stale_overdue_tasks_alerted(now=now, grace_minutes=2)
 
     assert repo.get_monitor_task(task.id).status == "alerted"
+
+
+def test_clear_active_runtime_tasks_cancels_open_and_duplicate_tasks(tmp_path):
+    conn = connect(str(tmp_path / "runtime-clear.sqlite3"))
+    migrate(conn)
+    repo = Repository(conn)
+    rule_id = repo.create_monitor_rule("-1001", "Ops", enabled=True)
+    now = datetime(2026, 6, 22, tzinfo=timezone.utc)
+    task_ids = []
+    for status in ("pending", "alerted", "duplicate"):
+        task = repo.create_monitor_task(
+            task_type="wait", rule_id=rule_id, chat_id="-1001", chat_name="Ops",
+            keyword="请稍等elk", staff_user_id=1, staff_username="staff",
+            root_message_id=10 + len(task_ids), wait_message_id=20 + len(task_ids),
+            trigger_message_id=20 + len(task_ids), message_excerpt="请稍等elk",
+            message_url="", recipient_chat_ids=[1], started_at=now, due_at=now,
+            status=status,
+        )
+        task_ids.append(task.id)
+
+    assert repo.clear_active_runtime_tasks() == task_ids
+    assert [repo.get_monitor_task(task_id).status for task_id in task_ids] == [
+        "cancelled", "cancelled", "cancelled"
+    ]
     assert repo.list_open_tasks() == []
 
 

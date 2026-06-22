@@ -425,20 +425,26 @@ class Repository:
         text: str,
         message_time: datetime,
         reply_to_message_id: int | None,
+        sender_display_name: str = "",
+        media_group_id: int | None = None,
+        message_kind: str = "text",
     ) -> None:
         self.conn.execute(
             """
             INSERT INTO message_snapshots(
-                chat_id, message_id, sender_user_id, sender_username, is_staff,
-                text, message_time, reply_to_message_id, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                chat_id, message_id, sender_user_id, sender_username, sender_display_name, is_staff,
+                text, message_time, reply_to_message_id, media_group_id, message_kind, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(chat_id, message_id) DO UPDATE SET
                 sender_user_id = excluded.sender_user_id,
                 sender_username = excluded.sender_username,
+                sender_display_name = excluded.sender_display_name,
                 is_staff = excluded.is_staff,
                 text = excluded.text,
                 message_time = excluded.message_time,
                 reply_to_message_id = excluded.reply_to_message_id,
+                media_group_id = excluded.media_group_id,
+                message_kind = excluded.message_kind,
                 updated_at = CURRENT_TIMESTAMP
             """,
             (
@@ -446,10 +452,13 @@ class Repository:
                 message_id,
                 sender_user_id,
                 sender_username,
+                sender_display_name,
                 int(is_staff),
                 text[:500],
                 message_time.isoformat(),
                 reply_to_message_id,
+                media_group_id,
+                message_kind,
             ),
         )
         self.conn.commit()
@@ -470,7 +479,46 @@ class Repository:
             text=row["text"],
             message_time=datetime.fromisoformat(row["message_time"]),
             reply_to_message_id=row["reply_to_message_id"],
+            sender_display_name=row["sender_display_name"],
+            media_group_id=row["media_group_id"],
+            message_kind=row["message_kind"],
         )
+
+    def has_media_group_snapshot(self, chat_id: str, media_group_id: int) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM message_snapshots WHERE chat_id = ? AND media_group_id = ? LIMIT 1",
+            (chat_id, media_group_id),
+        ).fetchone()
+        return row is not None
+
+    def list_message_snapshots_since(
+        self, since: datetime, exclude_chat_ids: set[str] | None = None, limit: int = 6000
+    ) -> list[MessageSnapshot]:
+        excluded = sorted(exclude_chat_ids or set())
+        where = "datetime(message_time) >= datetime(?)"
+        params: list[object] = [since.isoformat()]
+        if excluded:
+            where += f" AND chat_id NOT IN ({','.join('?' for _ in excluded)})"
+            params.extend(excluded)
+        rows = self.conn.execute(
+            f"SELECT * FROM message_snapshots WHERE {where} ORDER BY message_time DESC, message_id DESC LIMIT ?",
+            [*params, limit],
+        ).fetchall()
+        snapshots = [
+            MessageSnapshot(
+                chat_id=row["chat_id"], message_id=row["message_id"],
+                sender_user_id=row["sender_user_id"], sender_username=row["sender_username"],
+                is_staff=bool(row["is_staff"]), text=row["text"],
+                message_time=datetime.fromisoformat(row["message_time"]),
+                reply_to_message_id=row["reply_to_message_id"],
+                sender_display_name=row["sender_display_name"],
+                media_group_id=row["media_group_id"],
+                message_kind=row["message_kind"],
+            )
+            for row in rows
+        ]
+        snapshots.reverse()
+        return snapshots
 
     def enabled_chat_count(self) -> int:
         row = self.conn.execute("SELECT COUNT(*) AS count FROM monitor_rules WHERE enabled = 1").fetchone()
@@ -778,6 +826,26 @@ class Repository:
         ).fetchone()
         return self._task_from_row(row) if row else None
 
+    def latest_wait_for_reference(self, chat_id: str, message_id: int) -> MonitorTask | None:
+        row = self.conn.execute(
+            """
+            SELECT DISTINCT mt.*
+            FROM monitor_tasks mt
+            LEFT JOIN monitor_task_context_messages ctx ON ctx.task_id = mt.id
+            WHERE mt.chat_id = ?
+              AND mt.task_type = 'wait'
+              AND mt.status IN ('pending', 'completed', 'alerted')
+              AND (
+                ? IN (mt.root_message_id, mt.wait_message_id, mt.trigger_message_id)
+                OR ctx.message_id = ?
+              )
+            ORDER BY mt.id DESC
+            LIMIT 1
+            """,
+            (chat_id, message_id, message_id),
+        ).fetchone()
+        return self._task_from_row(row) if row else None
+
     def recipient_display_for_user(self, telegram_user_id: int, fallback_username: str = "") -> dict[str, str]:
         staff = self.conn.execute(
             """
@@ -899,6 +967,19 @@ class Repository:
             """
         ).fetchall()
         return [self._task_from_row(row) for row in rows]
+
+    def clear_active_runtime_tasks(self) -> list[int]:
+        rows = self.conn.execute(
+            "SELECT id FROM monitor_tasks WHERE status IN ('pending', 'alerted', 'duplicate') ORDER BY id"
+        ).fetchall()
+        task_ids = [int(row["id"]) for row in rows]
+        if task_ids:
+            self.conn.executemany(
+                "UPDATE monitor_tasks SET status = 'cancelled' WHERE id = ?",
+                [(task_id,) for task_id in task_ids],
+            )
+            self.conn.commit()
+        return task_ids
 
     def history_check_summary(self, limit: int = 20, now: datetime | None = None) -> dict[str, object]:
         now = now or datetime.now().astimezone()

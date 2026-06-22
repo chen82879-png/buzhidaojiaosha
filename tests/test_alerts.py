@@ -63,4 +63,4 @@ def test_followup_timeout_alert_uses_followup_reason():
     text = render_timeout_alert(staff, pending, timeout_minutes=15)
 
     assert "状态：跟进任务 15 分钟无引用回复" in text
-    assert "原因：客户再次引用已完成稍等消息后，未发现客服跟进" in text
+    assert "原因：客服回复继续处理后，未发现后续有效引用回复" in text

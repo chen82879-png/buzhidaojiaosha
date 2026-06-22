@@ -8,6 +8,22 @@
 
 {% block content %}
 <section class="mini-section">
+  <div class="mini-card-head">
+    <h2>AI 审计</h2>
+    <span>{{ '已配置' if gemini_configured else '未配置' }}</span>
+  </div>
+  <div class="mini-history-counts">
+    <button class="mini-button" type="button" data-audit-mode="ordinary">12 小时审计</button>
+    <button class="mini-button" type="button" data-audit-mode="full">20 小时审计</button>
+  </div>
+  <div id="ai-audit-result">
+    {% if ai_audit %}
+    <p>扫描 {{ ai_audit.scanned }} 条，异常 {{ ai_audit.findings|length }} 条</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="mini-section">
   <h2>今日闭环</h2>
   <div class="mini-card-list">
     <article class="mini-stats-card">
@@ -58,4 +74,22 @@
     {% endfor %}
   </div>
 </section>
+<script>
+document.querySelectorAll('[data-audit-mode]').forEach((button) => {
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    const target = document.getElementById('ai-audit-result');
+    target.textContent = '检测中';
+    try {
+      const response = await fetch(`/api/history/ai/${button.dataset.auditMode}`, {method: 'POST'});
+      const data = await response.json();
+      target.textContent = data.ok
+        ? `扫描 ${data.audit.scanned} 条，异常 ${data.audit.findings.length} 条`
+        : data.error;
+    } finally {
+      button.disabled = false;
+    }
+  });
+});
+</script>
 {% endblock %}
