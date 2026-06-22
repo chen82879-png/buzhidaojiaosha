@@ -60,6 +60,9 @@ def normalize_telegram_update(payload: dict) -> NormalizedTelegramMessage | None
         message_id=int(raw_message["message_id"]),
         sender_user_id=int(sender.get("id", 0)),
         sender_username=sender.get("username") or "",
+        sender_display_name=" ".join(
+            value for value in (sender.get("first_name"), sender.get("last_name")) if value
+        ),
         text=text,
         message_time=datetime.fromtimestamp(int(raw_message.get("date", time.time())), tz=timezone.utc),
         reply_to_message_id=reply.get("message_id"),

@@ -14,6 +14,19 @@ class Settings:
     telegram_api_hash: str
     listener_phone: str
     telethon_session_path: str
+    other_cs_ids: tuple[int, ...] = ()
+    keep_keywords: tuple[str, ...] = ()
+    ignore_keywords: tuple[str, ...] = ()
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.5-flash"
+
+
+def _split_values(raw: str, separators: tuple[str, ...] = (",", "|")) -> tuple[str, ...]:
+    value = str(raw or "")
+    for separator in separators[1:]:
+        value = value.replace(separator, separators[0])
+    value = value.replace("，", separators[0])
+    return tuple(item.strip() for item in value.split(separators[0]) if item.strip())
 
 
 def load_settings() -> Settings:
@@ -28,6 +41,11 @@ def load_settings() -> Settings:
         telegram_api_hash=os.getenv("TELEGRAM_API_HASH", ""),
         listener_phone=os.getenv("LISTENER_PHONE", ""),
         telethon_session_path=os.getenv("TELETHON_SESSION_PATH", "./data/listener.session"),
+        other_cs_ids=tuple(int(value) for value in _split_values(os.getenv("OTHER_CS_IDS", ""))),
+        keep_keywords=_split_values(os.getenv("KEEP_KEYWORDS", "")),
+        ignore_keywords=_split_values(os.getenv("IGNORE_KEYWORDS", ""), (",",)),
+        gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
     )
 
 

@@ -5,6 +5,7 @@ from app.fixed_keywords import FIXED_KEYWORDS
 from app.ignore_words import is_completed_acknowledgement, is_ignored_followup_text
 from app.matcher import match_enabled_keyword, match_message
 from app.models import MonitorTask, PendingMessage
+from app.staff_identity import StaffIdentity
 from app.telegram_utils import build_message_url
 
 WAIT_TIMEOUT_MINUTES = 8
@@ -24,6 +25,9 @@ class NormalizedTelegramMessage:
     text: str
     message_time: datetime
     reply_to_message_id: int | None
+    sender_display_name: str = ""
+    media_group_id: int | None = None
+    message_kind: str = "text"
 
 
 async def handle_incoming_message(
@@ -32,16 +36,18 @@ async def handle_incoming_message(
     queue,
     timeout_minutes: int,
     now_timestamp: float,
+    staff_identity: StaffIdentity | None = None,
 ) -> None:
     rules = repo.list_enabled_rules()
     enabled_chat_ids = {rule.chat_id for rule in rules}
     if message.chat_id not in enabled_chat_ids:
         return
     keyword_configs = repo.list_keyword_configs() if hasattr(repo, "list_keyword_configs") else []
-    configured_staff_ids = {
-        chat_id for config in keyword_configs if config.enabled for chat_id in config.recipient_chat_ids
-    }
-    is_configured_staff = message.sender_user_id in configured_staff_ids
+    identity = staff_identity or StaffIdentity.source_defaults()
+    is_configured_staff = identity.is_staff(
+        message.sender_user_id,
+        message.sender_display_name or message.sender_username,
+    )
     if hasattr(repo, "upsert_message_snapshot"):
         repo.upsert_message_snapshot(
             chat_id=message.chat_id,

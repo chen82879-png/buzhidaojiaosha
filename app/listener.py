@@ -11,6 +11,7 @@ from app.group_configurator import configure_monitor_groups_from_dialogs
 from app.poller import cleanup_deleted_wait_tasks
 from app.redis_queue import RedisQueue
 from app.repositories import Repository
+from app.staff_identity import StaffIdentity
 
 
 def normalize_telethon_message(message) -> NormalizedTelegramMessage | None:
@@ -30,9 +31,17 @@ def normalize_telethon_message(message) -> NormalizedTelegramMessage | None:
         message_id=int(getattr(message, "id")),
         sender_user_id=int(getattr(message, "sender_id", 0) or 0),
         sender_username=getattr(sender, "username", None) or "",
+        sender_display_name=" ".join(
+            value for value in (
+                getattr(sender, "first_name", None),
+                getattr(sender, "last_name", None),
+            ) if value
+        ),
         text=text,
         message_time=getattr(message, "date"),
         reply_to_message_id=getattr(message, "reply_to_msg_id", None),
+        media_group_id=getattr(message, "grouped_id", None),
+        message_kind="media" if has_media else "text",
     )
 
 
@@ -43,6 +52,7 @@ async def run_listener(settings: Settings | None = None) -> None:
     repo = Repository(conn)
     queue = RedisQueue(redis_async.from_url(settings.redis_url, decode_responses=True))
     client = TelegramClient(settings.telethon_session_path, settings.telegram_api_id, settings.telegram_api_hash)
+    staff_identity = StaffIdentity.source_defaults(extra_ids=settings.other_cs_ids)
 
     @client.on(events.NewMessage)
     async def on_new_message(event):
@@ -55,6 +65,7 @@ async def run_listener(settings: Settings | None = None) -> None:
             queue,
             settings.global_timeout_minutes,
             time.time(),
+            staff_identity=staff_identity,
         )
 
     @client.on(events.MessageEdited)
@@ -76,6 +87,7 @@ async def run_listener(settings: Settings | None = None) -> None:
             queue,
             settings.global_timeout_minutes,
             time.time(),
+            staff_identity=staff_identity,
         )
 
     async def message_deleted(chat_id: str, message_id: int) -> bool:
@@ -91,6 +103,11 @@ async def run_listener(settings: Settings | None = None) -> None:
             await asyncio.sleep(60)
 
     await client.start(phone=settings.listener_phone)
+    me = await client.get_me()
+    staff_identity = StaffIdentity.source_defaults(
+        listener_user_id=int(getattr(me, "id", 0) or 0),
+        extra_ids=settings.other_cs_ids,
+    )
     await configure_monitor_groups_from_dialogs(repo, client)
     asyncio.create_task(polling_loop())
     await client.run_until_disconnected()
