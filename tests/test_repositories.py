@@ -543,6 +543,31 @@ def test_first_alert_schedules_one_severe_alert_and_can_be_completed(tmp_path):
     assert repo.list_due_severe_tasks(severe_due_at) == []
 
 
+def test_first_alert_hides_task_from_open_list_but_keeps_runtime_severe_tracking(tmp_path):
+    conn = connect(str(tmp_path / "app.sqlite3"))
+    migrate(conn)
+    repo = Repository(conn)
+    rule_id = repo.create_monitor_rule(chat_id="-1001", chat_name="Ops", enabled=True)
+    task = repo.create_monitor_task(
+        task_type="wait", rule_id=rule_id, chat_id="-1001", chat_name="Ops",
+        keyword="璇风◢绛塭lk", staff_user_id=10001, staff_username="elk",
+        root_message_id=40, wait_message_id=50, trigger_message_id=50,
+        message_excerpt="璇风◢绛塭lk", message_url="https://t.me/c/1001/50",
+        recipient_chat_ids=[10001],
+        started_at=datetime(2026, 6, 19, 9, 52, tzinfo=timezone.utc),
+        due_at=datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc),
+    )
+    first_alert_at = datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc)
+    severe_due_at = first_alert_at + timedelta(minutes=10)
+
+    repo.mark_first_alert_sent(task.id, first_alert_at, severe_due_at)
+
+    alerted = repo.get_monitor_task(task.id)
+    assert repo.list_open_tasks() == []
+    assert repo.list_runtime_tasks() == [alerted]
+    assert repo.list_due_severe_tasks(severe_due_at) == [alerted]
+
+
 def test_mark_severe_alert_sent_is_idempotent(tmp_path):
     conn = connect(str(tmp_path / "app.sqlite3"))
     migrate(conn)

@@ -962,7 +962,22 @@ class Repository:
             """
             SELECT * FROM monitor_tasks
             WHERE status = 'pending'
-               OR (status = 'alerted' AND first_alert_sent_at IS NOT NULL)
+            ORDER BY due_at, id
+            """
+        ).fetchall()
+        return [self._task_from_row(row) for row in rows]
+
+    def list_runtime_tasks(self) -> list[MonitorTask]:
+        rows = self.conn.execute(
+            """
+            SELECT * FROM monitor_tasks
+            WHERE status = 'pending'
+               OR (
+                   status = 'alerted'
+                   AND task_type = 'wait'
+                   AND first_alert_sent_at IS NOT NULL
+                   AND severe_alert_sent_at IS NULL
+               )
             ORDER BY due_at, id
             """
         ).fetchall()

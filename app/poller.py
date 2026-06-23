@@ -6,9 +6,10 @@ MessageDeletedChecker = Callable[[str, int], Awaitable[bool]]
 
 
 async def cleanup_deleted_wait_tasks(repo, queue, is_message_deleted: MessageDeletedChecker) -> None:
+    source_tasks = repo.list_runtime_tasks() if hasattr(repo, "list_runtime_tasks") else repo.list_open_tasks()
     tasks = [
         task
-        for task in repo.list_open_tasks()
+        for task in source_tasks
         if task.task_type in {"wait", "followup", "reply", "self_reply"}
     ]
     processed_task_ids: set[int] = set()

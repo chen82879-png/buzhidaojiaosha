@@ -151,3 +151,30 @@ async def test_deleted_additional_context_message_closes_linked_task(tmp_path):
     assert repo.get_monitor_task(task.id).status == "deleted"
     assert queue.closed == [task.id]
 
+
+async def test_deleted_alerted_wait_closes_hidden_runtime_task(tmp_path):
+    repo, rule_id = make_repo(tmp_path)
+    started = datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc)
+    task = repo.create_monitor_task(
+        task_type="wait", rule_id=rule_id, chat_id="-1001", chat_name="Ops",
+        keyword="璇风◢绛塭lk", staff_user_id=10001, staff_username="elk",
+        root_message_id=40, wait_message_id=50, trigger_message_id=50,
+        message_excerpt="璇风◢绛塭lk", message_url="https://t.me/c/1001/50",
+        recipient_chat_ids=[10001], started_at=started,
+        due_at=started + timedelta(minutes=12),
+    )
+    repo.mark_first_alert_sent(
+        task.id,
+        started + timedelta(minutes=12),
+        started + timedelta(minutes=22),
+    )
+    queue = FakeQueue()
+
+    async def deleted(_chat_id, message_id):
+        return message_id == 50
+
+    await cleanup_deleted_wait_tasks(repo, queue, deleted)
+
+    assert repo.get_monitor_task(task.id).status == "deleted"
+    assert queue.closed == [task.id]
+
