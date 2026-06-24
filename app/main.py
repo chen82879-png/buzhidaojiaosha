@@ -437,44 +437,6 @@ def create_app(
         summary = repo.history_check_summary(limit=20, now=now_provider()) if hasattr(repo, "history_check_summary") else {}
         return {"summary": summary}
 
-    @app.get("/api/debug/keyword-activity")
-    async def api_debug_keyword_activity(
-        token: str = "",
-        keyword: str = "请稍等elk",
-        start_bj: str = "2026-06-23T20:00:00",
-        end_bj: str = "2026-06-24T00:00:00",
-    ):
-        if token != "diag-20260624-elk":
-            return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
-        if not hasattr(repo, "keyword_activity_between"):
-            return JSONResponse({"ok": False, "error": "diagnostic unavailable"}, status_code=503)
-        try:
-            start_local = datetime.fromisoformat(start_bj).replace(tzinfo=DISPLAY_TZ)
-            end_local = datetime.fromisoformat(end_bj).replace(tzinfo=DISPLAY_TZ)
-        except ValueError:
-            return JSONResponse({"ok": False, "error": "invalid datetime"}, status_code=400)
-        start_utc = start_local.astimezone(timezone.utc)
-        end_utc = end_local.astimezone(timezone.utc)
-        activity = repo.keyword_activity_between(keyword, start_utc, end_utc)
-        tasks = activity.get("tasks", [])
-        hits = activity.get("hits", [])
-        return {
-            "ok": True,
-            "keyword": keyword,
-            "range_bj": {
-                "start": start_local.isoformat(),
-                "end": end_local.isoformat(),
-            },
-            "range_utc": {
-                "start": start_utc.isoformat(),
-                "end": end_utc.isoformat(),
-            },
-            "task_count": len(tasks),
-            "hit_count": len(hits),
-            "tasks": tasks,
-            "hits": hits,
-        }
-
     @app.post("/api/history/ai/{mode}")
     async def api_history_ai(mode: str):
         if mode not in LOOKBACK_HOURS:

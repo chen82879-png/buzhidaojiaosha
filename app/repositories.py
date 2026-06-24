@@ -181,68 +181,6 @@ class Repository:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def keyword_activity_between(
-        self,
-        keyword: str,
-        start: datetime,
-        end: datetime,
-    ) -> dict[str, list[dict[str, object]]]:
-        tasks = self.conn.execute(
-            """
-            SELECT
-                id,
-                task_type,
-                status,
-                chat_id,
-                chat_name,
-                keyword,
-                staff_user_id,
-                staff_username,
-                root_message_id,
-                wait_message_id,
-                trigger_message_id,
-                message_excerpt,
-                message_url,
-                started_at,
-                due_at,
-                alert_sent_at,
-                completed_at,
-                created_at
-            FROM monitor_tasks
-            WHERE keyword = ?
-              AND datetime(started_at) >= datetime(?)
-              AND datetime(started_at) < datetime(?)
-            ORDER BY datetime(started_at), id
-            """,
-            (keyword, start.isoformat(), end.isoformat()),
-        ).fetchall()
-        hits = self.conn.execute(
-            """
-            SELECT
-                id,
-                chat_id,
-                chat_name,
-                message_id,
-                telegram_user_id,
-                telegram_username,
-                matched_keyword,
-                message_excerpt,
-                message_url,
-                message_time,
-                created_at
-            FROM keyword_hits
-            WHERE matched_keyword = ?
-              AND datetime(message_time) >= datetime(?)
-              AND datetime(message_time) < datetime(?)
-            ORDER BY datetime(message_time), id
-            """,
-            (keyword, start.isoformat(), end.isoformat()),
-        ).fetchall()
-        return {
-            "tasks": [dict(row) for row in tasks],
-            "hits": [dict(row) for row in hits],
-        }
-
     def rollup_keyword_hits(self, before: datetime) -> None:
         rows = self.conn.execute(
             """
