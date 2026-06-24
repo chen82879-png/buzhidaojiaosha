@@ -382,3 +382,45 @@ def test_config_status_api_returns_safe_configuration_summary():
     assert "telegram_bot_token" not in str(payload).lower()
     assert "telegram_api_hash" not in str(payload).lower()
     assert "listener_phone" not in str(payload).lower()
+
+
+def test_debug_keyword_activity_requires_token():
+    class Repo:
+        def keyword_activity_between(self, keyword, start, end):
+            return {"tasks": [], "hits": []}
+
+    client = TestClient(create_app(repo=Repo()))
+    response = client.get("/api/debug/keyword-activity")
+
+    assert response.status_code == 404
+
+
+def test_debug_keyword_activity_returns_keyword_tasks_and_hits():
+    class Repo:
+        def keyword_activity_between(self, keyword, start, end):
+            self.args = (keyword, start, end)
+            return {
+                "tasks": [{"id": 1, "task_type": "wait", "status": "completed"}],
+                "hits": [{"id": 2, "matched_keyword": keyword}],
+            }
+
+    repo = Repo()
+    client = TestClient(create_app(repo=repo))
+    response = client.get(
+        "/api/debug/keyword-activity",
+        params={
+            "token": "diag-20260624-elk",
+            "keyword": "请稍等elk",
+            "start_bj": "2026-06-23T20:00:00",
+            "end_bj": "2026-06-24T00:00:00",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["keyword"] == "请稍等elk"
+    assert payload["task_count"] == 1
+    assert payload["hit_count"] == 1
+    assert payload["tasks"][0]["id"] == 1
+    assert repo.args[1].isoformat() == "2026-06-23T12:00:00+00:00"
+    assert repo.args[2].isoformat() == "2026-06-23T16:00:00+00:00"
