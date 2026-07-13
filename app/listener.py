@@ -23,14 +23,6 @@ def normalize_telethon_message(message) -> NormalizedTelegramMessage | None:
     chat = getattr(message, "chat", None)
     sender = getattr(message, "sender", None)
     chat_id = str(getattr(message, "chat_id", ""))
-    sender_display_name = " ".join(
-        part
-        for part in [
-            getattr(sender, "first_name", None),
-            getattr(sender, "last_name", None),
-        ]
-        if part
-    ).strip()
     return NormalizedTelegramMessage(
         chat_id=chat_id,
         chat_name=getattr(chat, "title", None) or getattr(chat, "first_name", None) or chat_id,
@@ -38,7 +30,6 @@ def normalize_telethon_message(message) -> NormalizedTelegramMessage | None:
         message_id=int(getattr(message, "id")),
         sender_user_id=int(getattr(message, "sender_id", 0) or 0),
         sender_username=getattr(sender, "username", None) or "",
-        sender_display_name=sender_display_name or getattr(sender, "username", None) or "",
         text=text,
         message_time=getattr(message, "date"),
         reply_to_message_id=getattr(message, "reply_to_msg_id", None),

@@ -101,38 +101,6 @@ class FakeRepo:
                 completed.append(completed_task)
         return completed
 
-    def complete_watching_replies_referencing(self, chat_id, reply_to_message_id, completed_at):
-        completed = []
-        for task in self.tasks:
-            if (
-                task.status == "watching"
-                and task.task_type == "reply"
-                and task.chat_id == chat_id
-                and reply_to_message_id in self.context_messages.get(task.id, set())
-            ):
-                completed_task = MonitorTask(
-                    id=task.id,
-                    task_type=task.task_type,
-                    status="completed",
-                    rule_id=task.rule_id,
-                    chat_id=task.chat_id,
-                    chat_name=task.chat_name,
-                    keyword=task.keyword,
-                    staff_user_id=task.staff_user_id,
-                    staff_username=task.staff_username,
-                    root_message_id=task.root_message_id,
-                    wait_message_id=task.wait_message_id,
-                    trigger_message_id=task.trigger_message_id,
-                    message_excerpt=task.message_excerpt,
-                    message_url=task.message_url,
-                    recipient_chat_ids=task.recipient_chat_ids,
-                    started_at=task.started_at,
-                    due_at=task.due_at,
-                )
-                self.tasks[task.id - 1] = completed_task
-                completed.append(completed_task)
-        return completed
-
     def latest_completed_wait_for_reference(self, chat_id, message_id):
         for task in reversed(self.tasks):
             if (
@@ -153,23 +121,6 @@ class FakeRepo:
                 and task.staff_user_id == sender_user_id
             ):
                 return task
-        return None
-
-    def latest_special_processing_reply_for_message(self, chat_id, message_id, account_names):
-        normalized_names = {name.lower().replace(" ", "") for name in account_names}
-        for snapshot in reversed(list(self.snapshots.values())):
-            display_name = getattr(snapshot, "sender_display_name", "")
-            sender_names = {
-                snapshot.sender_username.lower().replace(" ", ""),
-                display_name.lower().replace(" ", ""),
-            }
-            if (
-                snapshot.chat_id == chat_id
-                and snapshot.reply_to_message_id == message_id
-                and sender_names & normalized_names
-                and "同意后处理" in snapshot.text
-            ):
-                return snapshot
         return None
 
 
@@ -437,7 +388,7 @@ async def test_ignored_customer_requote_does_not_create_followup_task():
     assert queue.pending[-1][0].task_type == "wait"
 
 
-async def test_customer_reply_to_staff_message_does_not_create_reply_task():
+async def test_customer_reply_to_staff_message_creates_reply_task():
     repo = FakeRepo()
     queue = FakeQueue()
     await handle_incoming_message(
@@ -476,144 +427,9 @@ async def test_customer_reply_to_staff_message_does_not_create_reply_task():
         now_timestamp=1060,
     )
 
-    assert repo.tasks == []
-    assert queue.pending == []
-
-
-async def test_customer_non_reply_without_enabled_keyword_creates_watching_reply_task():
-    class MultiRecipientRepo(FakeRepo):
-        def list_keyword_configs(self):
-            return [
-                KeywordConfig(keyword="请稍等elk", enabled=True, recipient_chat_ids=[10001], alert_enabled=True),
-                KeywordConfig(keyword="请稍等ART", enabled=True, recipient_chat_ids=[10002], alert_enabled=True),
-                KeywordConfig(keyword="请稍等MAD", enabled=True, recipient_chat_ids=[10003], alert_enabled=False),
-            ]
-
-    repo = MultiRecipientRepo()
-    queue = FakeQueue()
-
-    await handle_incoming_message(
-        NormalizedTelegramMessage(
-            chat_id="-1001",
-            chat_name="Ops",
-            chat_username="",
-            message_id=90,
-            sender_user_id=20001,
-            sender_username="customer",
-            text="这个订单怎么还没处理",
-            message_time=datetime(2026, 6, 4, 13, 14, 25, tzinfo=timezone.utc),
-            reply_to_message_id=None,
-        ),
-        repo,
-        queue,
-        timeout_minutes=15,
-        now_timestamp=1180,
-    )
-
     assert repo.tasks[-1].task_type == "reply"
-    assert repo.tasks[-1].status == "watching"
-    assert repo.tasks[-1].recipient_chat_ids == [10001, 10002]
-    assert repo.tasks[-1].due_at.minute == 24
-    assert queue.pending == []
-
-
-async def test_rule_staff_non_reply_message_does_not_create_global_reply_task():
-    repo = FakeRepo()
-    queue = FakeQueue()
-
-    await handle_incoming_message(
-        NormalizedTelegramMessage(
-            chat_id="-1001",
-            chat_name="Ops",
-            chat_username="",
-            message_id=94,
-            sender_user_id=9001,
-            sender_username="agent",
-            text="查询一下这个会员",
-            message_time=datetime(2026, 6, 4, 13, 14, 25, tzinfo=timezone.utc),
-            reply_to_message_id=None,
-        ),
-        repo,
-        queue,
-        timeout_minutes=15,
-        now_timestamp=1180,
-    )
-
-    assert repo.tasks == []
-    assert queue.pending == []
-
-
-async def test_customer_non_reply_with_enabled_keyword_does_not_create_reply_task():
-    repo = FakeRepo()
-    queue = FakeQueue()
-
-    await handle_incoming_message(
-        NormalizedTelegramMessage(
-            chat_id="-1001",
-            chat_name="Ops",
-            chat_username="",
-            message_id=91,
-            sender_user_id=20001,
-            sender_username="customer",
-            text="请稍等elk",
-            message_time=datetime(2026, 6, 4, 13, 14, 25, tzinfo=timezone.utc),
-            reply_to_message_id=None,
-        ),
-        repo,
-        queue,
-        timeout_minutes=15,
-        now_timestamp=1180,
-    )
-
-    assert repo.tasks == []
-    assert queue.pending == []
-
-
-async def test_staff_keyword_reply_closes_global_reply_and_creates_wait_task():
-    repo = FakeRepo()
-    queue = FakeQueue()
-    await handle_incoming_message(
-        NormalizedTelegramMessage(
-            chat_id="-1001",
-            chat_name="Ops",
-            chat_username="",
-            message_id=92,
-            sender_user_id=20001,
-            sender_username="customer",
-            text="查询123",
-            message_time=datetime(2026, 6, 4, 13, 14, 25, tzinfo=timezone.utc),
-            reply_to_message_id=None,
-        ),
-        repo,
-        queue,
-        timeout_minutes=15,
-        now_timestamp=1180,
-    )
-
-    await handle_incoming_message(
-        NormalizedTelegramMessage(
-            chat_id="-1001",
-            chat_name="Ops",
-            chat_username="",
-            message_id=93,
-            sender_user_id=10001,
-            sender_username="elk",
-            text="请稍等elk",
-            message_time=datetime(2026, 6, 4, 13, 15, 25, tzinfo=timezone.utc),
-            reply_to_message_id=92,
-        ),
-        repo,
-        queue,
-        timeout_minutes=15,
-        now_timestamp=1240,
-    )
-
-    assert repo.tasks[0].task_type == "reply"
-    assert repo.tasks[0].status == "completed"
-    assert repo.tasks[1].task_type == "wait"
-    assert repo.tasks[1].root_message_id == 92
-    assert queue.closed == [1]
-    assert queue.pending[-1][0].task_type == "wait"
+    assert repo.tasks[-1].due_at.minute == 17
+    assert queue.pending[-1][0].task_type == "reply"
 
 
 async def test_ignored_customer_reply_to_staff_message_does_not_create_reply_task():
@@ -703,7 +519,7 @@ async def test_unconfigured_chat_reply_to_staff_does_not_create_reply_task_or_sn
     assert queue.pending == []
 
 
-async def test_customer_supplement_without_keyword_creates_reply_task():
+async def test_customer_supplement_after_reply_task_creates_self_reply_task():
     repo = FakeRepo()
     queue = FakeQueue()
     await handle_incoming_message(
@@ -759,76 +575,9 @@ async def test_customer_supplement_without_keyword_creates_reply_task():
         now_timestamp=1120,
     )
 
-    assert repo.tasks[-1].task_type == "reply"
-    assert repo.tasks[-1].status == "watching"
-    assert repo.tasks[-1].due_at.minute == 23
-    assert queue.pending == []
-
-
-async def test_approval_after_special_processing_account_creates_self_reply_task():
-    repo = FakeRepo()
-    queue = FakeQueue()
-    await handle_incoming_message(
-        NormalizedTelegramMessage(
-            chat_id="-1001",
-            chat_name="Ops",
-            chat_username="",
-            message_id=100,
-            sender_user_id=20001,
-            sender_username="customer",
-            text="需要处理这个订单",
-            message_time=datetime(2026, 6, 4, 13, 10, 25, tzinfo=timezone.utc),
-            reply_to_message_id=None,
-        ),
-        repo,
-        queue,
-        timeout_minutes=15,
-        now_timestamp=940,
-    )
-    repo.tasks.clear()
-    queue.pending.clear()
-
-    await handle_incoming_message(
-        NormalizedTelegramMessage(
-            chat_id="-1001",
-            chat_name="Ops",
-            chat_username="",
-            message_id=101,
-            sender_user_id=30001,
-            sender_username="",
-            sender_display_name="Y_YY_grybuges",
-            text="@领导同意后处理",
-            message_time=datetime(2026, 6, 4, 13, 11, 25, tzinfo=timezone.utc),
-            reply_to_message_id=100,
-        ),
-        repo,
-        queue,
-        timeout_minutes=15,
-        now_timestamp=1000,
-    )
-
-    await handle_incoming_message(
-        NormalizedTelegramMessage(
-            chat_id="-1001",
-            chat_name="Ops",
-            chat_username="",
-            message_id=102,
-            sender_user_id=40001,
-            sender_username="leader",
-            text="确认",
-            message_time=datetime(2026, 6, 4, 13, 12, 25, tzinfo=timezone.utc),
-            reply_to_message_id=101,
-        ),
-        repo,
-        queue,
-        timeout_minutes=15,
-        now_timestamp=1060,
-    )
-
     assert repo.tasks[-1].task_type == "self_reply"
-    assert repo.tasks[-1].due_at.minute == 22
+    assert repo.tasks[-1].due_at.minute == 16
     assert queue.pending[-1][0].task_type == "self_reply"
-    assert queue.pending[-1][1] == datetime(2026, 6, 4, 13, 22, 25, tzinfo=timezone.utc).timestamp()
 
 
 async def test_ignored_customer_supplement_does_not_create_self_reply_task():
@@ -887,8 +636,8 @@ async def test_ignored_customer_supplement_does_not_create_self_reply_task():
         now_timestamp=1120,
     )
 
-    assert repo.tasks == []
-    assert queue.pending == []
+    assert len(repo.tasks) == 1
+    assert repo.tasks[0].task_type == "reply"
 
 
 async def test_customer_supplement_to_wait_becomes_context_for_completion():

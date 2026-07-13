@@ -5,7 +5,6 @@ from zoneinfo import ZoneInfo
 
 from app.fixed_keywords import FIXED_KEYWORDS
 from app.models import KeywordConfig, MessageSnapshot, MonitorRule, MonitorTask, RuleKeyword, RuleStaff
-from app.special_accounts import is_self_reply_processing_text, is_special_self_reply_account
 
 DISPLAY_TZ = ZoneInfo("Asia/Shanghai")
 ANOMALY_LABELS = {
@@ -258,51 +257,6 @@ class Repository:
         )
         self.conn.commit()
 
-    def clear_reply_tasks_and_legacy_rule_keywords_once(self, marker_key: str) -> dict[str, object]:
-        marker = self.conn.execute(
-            "SELECT value FROM settings WHERE key = ?",
-            (marker_key,),
-        ).fetchone()
-        if marker is not None and marker["value"] == "done":
-            return {
-                "already_done": True,
-                "reply_task_ids": [],
-                "legacy_rule_keywords_deleted": 0,
-            }
-
-        reply_rows = self.conn.execute(
-            """
-            SELECT id
-            FROM monitor_tasks
-            WHERE task_type = 'reply'
-              AND status IN ('watching', 'pending', 'alerted')
-            ORDER BY id
-            """
-        ).fetchall()
-        reply_task_ids = [int(row["id"]) for row in reply_rows]
-        if reply_task_ids:
-            self.conn.executemany(
-                "UPDATE monitor_tasks SET status = 'deleted' WHERE id = ?",
-                [(task_id,) for task_id in reply_task_ids],
-            )
-        deleted_keywords = self.conn.execute("DELETE FROM rule_keywords").rowcount
-        self.conn.execute(
-            """
-            INSERT INTO settings(key, value, updated_at)
-            VALUES (?, 'done', CURRENT_TIMESTAMP)
-            ON CONFLICT(key) DO UPDATE SET
-                value = excluded.value,
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (marker_key,),
-        )
-        self.conn.commit()
-        return {
-            "already_done": False,
-            "reply_task_ids": reply_task_ids,
-            "legacy_rule_keywords_deleted": deleted_keywords,
-        }
-
     def keyword_statistics(self, now: datetime | None = None) -> list[dict[str, object]]:
         now = now or datetime.now().astimezone()
         local_now = now.astimezone(DISPLAY_TZ) if now.tzinfo else now.replace(tzinfo=DISPLAY_TZ)
@@ -463,18 +417,16 @@ class Repository:
         text: str,
         message_time: datetime,
         reply_to_message_id: int | None,
-        sender_display_name: str = "",
     ) -> None:
         self.conn.execute(
             """
             INSERT INTO message_snapshots(
-                chat_id, message_id, sender_user_id, sender_username, sender_display_name,
-                is_staff, text, message_time, reply_to_message_id, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                chat_id, message_id, sender_user_id, sender_username, is_staff,
+                text, message_time, reply_to_message_id, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(chat_id, message_id) DO UPDATE SET
                 sender_user_id = excluded.sender_user_id,
                 sender_username = excluded.sender_username,
-                sender_display_name = excluded.sender_display_name,
                 is_staff = excluded.is_staff,
                 text = excluded.text,
                 message_time = excluded.message_time,
@@ -486,7 +438,6 @@ class Repository:
                 message_id,
                 sender_user_id,
                 sender_username,
-                sender_display_name,
                 int(is_staff),
                 text[:500],
                 message_time.isoformat(),
@@ -511,41 +462,7 @@ class Repository:
             text=row["text"],
             message_time=datetime.fromisoformat(row["message_time"]),
             reply_to_message_id=row["reply_to_message_id"],
-            sender_display_name=row["sender_display_name"],
         )
-
-    def latest_special_processing_reply_for_message(
-        self,
-        chat_id: str,
-        message_id: int,
-        account_names: set[str],
-    ) -> MessageSnapshot | None:
-        rows = self.conn.execute(
-            """
-            SELECT *
-            FROM message_snapshots
-            WHERE chat_id = ?
-              AND reply_to_message_id = ?
-            ORDER BY message_time DESC, message_id DESC
-            """,
-            (chat_id, message_id),
-        ).fetchall()
-        for row in rows:
-            snapshot = MessageSnapshot(
-                chat_id=row["chat_id"],
-                message_id=row["message_id"],
-                sender_user_id=row["sender_user_id"],
-                sender_username=row["sender_username"],
-                is_staff=bool(row["is_staff"]),
-                text=row["text"],
-                message_time=datetime.fromisoformat(row["message_time"]),
-                reply_to_message_id=row["reply_to_message_id"],
-                sender_display_name=row["sender_display_name"],
-            )
-            if is_special_self_reply_account(snapshot.sender_username, snapshot.sender_display_name):
-                if is_self_reply_processing_text(snapshot.text):
-                    return snapshot
-        return None
 
     def enabled_chat_count(self) -> int:
         row = self.conn.execute("SELECT COUNT(*) AS count FROM monitor_rules WHERE enabled = 1").fetchone()
@@ -788,37 +705,6 @@ class Repository:
             self.conn.commit()
         return [self._task_from_row(row) for row in rows]
 
-    def complete_watching_replies_referencing(
-        self,
-        chat_id: str,
-        reply_to_message_id: int,
-        completed_at: datetime,
-    ) -> list[MonitorTask]:
-        rows = self.conn.execute(
-            """
-            SELECT DISTINCT mt.*
-            FROM monitor_tasks mt
-            LEFT JOIN monitor_task_context_messages ctx ON ctx.task_id = mt.id
-            WHERE mt.chat_id = ?
-              AND mt.status = 'watching'
-              AND mt.task_type = 'reply'
-              AND (
-                ? IN (mt.root_message_id, mt.wait_message_id, mt.trigger_message_id)
-                OR ctx.message_id = ?
-              )
-            ORDER BY mt.id
-            """,
-            (chat_id, reply_to_message_id, reply_to_message_id),
-        ).fetchall()
-        task_ids = [row["id"] for row in rows]
-        if task_ids:
-            self.conn.executemany(
-                "UPDATE monitor_tasks SET status = 'completed', completed_at = ? WHERE id = ?",
-                [(completed_at.isoformat(), task_id) for task_id in task_ids],
-            )
-            self.conn.commit()
-        return [self._task_from_row(row) for row in rows]
-
     def latest_completed_wait_for_reference(self, chat_id: str, message_id: int) -> MonitorTask | None:
         row = self.conn.execute(
             """
@@ -883,14 +769,6 @@ class Repository:
         )
         self.conn.commit()
 
-    def activate_watching_task(self, task_id: int, due_at: datetime) -> MonitorTask:
-        self.conn.execute(
-            "UPDATE monitor_tasks SET status = 'pending', due_at = ? WHERE id = ? AND status = 'watching'",
-            (due_at.isoformat(), task_id),
-        )
-        self.conn.commit()
-        return self.get_monitor_task(task_id)
-
     def mark_stale_overdue_tasks_alerted(self, now: datetime, grace_minutes: int = 2) -> None:
         cutoff = now - timedelta(minutes=grace_minutes)
         self.conn.execute(
@@ -922,171 +800,6 @@ class Repository:
             """
         ).fetchall()
         return [self._task_from_row(row) for row in rows]
-
-    def create_automation_command(
-        self,
-        action: str,
-        payload: dict[str, object] | None = None,
-        request_chat_id: str = "",
-        request_message_id: int | None = None,
-        now: datetime | None = None,
-    ) -> dict[str, object]:
-        now = now or datetime.now().astimezone()
-        cur = self.conn.execute(
-            """
-            INSERT INTO automation_commands(
-                action, payload_json, status, request_chat_id, request_message_id,
-                created_at, updated_at
-            ) VALUES (?, ?, 'pending', ?, ?, ?, ?)
-            """,
-            (
-                action.strip(),
-                json.dumps(payload or {}, ensure_ascii=False),
-                request_chat_id,
-                request_message_id,
-                now.isoformat(),
-                now.isoformat(),
-            ),
-        )
-        self.conn.commit()
-        return self.get_automation_command(int(cur.lastrowid))
-
-    def claim_next_automation_command(
-        self,
-        worker_id: str,
-        now: datetime | None = None,
-        lease_seconds: int = 120,
-    ) -> dict[str, object] | None:
-        now = now or datetime.now().astimezone()
-        expires_at = now + timedelta(seconds=lease_seconds)
-        self.conn.execute(
-            """
-            UPDATE automation_commands
-            SET status = 'pending',
-                claimed_by = '',
-                claimed_at = NULL,
-                expires_at = NULL,
-                updated_at = ?
-            WHERE status = 'running'
-              AND expires_at IS NOT NULL
-              AND datetime(expires_at) < datetime(?)
-            """,
-            (now.isoformat(), now.isoformat()),
-        )
-        row = self.conn.execute(
-            """
-            SELECT id
-            FROM automation_commands
-            WHERE status = 'pending'
-            ORDER BY datetime(created_at), id
-            LIMIT 1
-            """
-        ).fetchone()
-        if row is None:
-            self.conn.commit()
-            return None
-        command_id = int(row["id"])
-        cur = self.conn.execute(
-            """
-            UPDATE automation_commands
-            SET status = 'running',
-                claimed_by = ?,
-                claimed_at = ?,
-                expires_at = ?,
-                updated_at = ?
-            WHERE id = ?
-              AND status = 'pending'
-            """,
-            (worker_id, now.isoformat(), expires_at.isoformat(), now.isoformat(), command_id),
-        )
-        self.conn.commit()
-        if cur.rowcount != 1:
-            return None
-        return self.get_automation_command(command_id)
-
-    def complete_automation_command(
-        self,
-        command_id: int,
-        result: dict[str, object] | None = None,
-        now: datetime | None = None,
-    ) -> dict[str, object] | None:
-        now = now or datetime.now().astimezone()
-        self.conn.execute(
-            """
-            UPDATE automation_commands
-            SET status = 'succeeded',
-                result_json = ?,
-                error_message = '',
-                finished_at = ?,
-                expires_at = NULL,
-                updated_at = ?
-            WHERE id = ?
-            """,
-            (json.dumps(result or {}, ensure_ascii=False), now.isoformat(), now.isoformat(), command_id),
-        )
-        self.conn.commit()
-        return self.get_automation_command(command_id)
-
-    def fail_automation_command(
-        self,
-        command_id: int,
-        error: str,
-        now: datetime | None = None,
-    ) -> dict[str, object] | None:
-        now = now or datetime.now().astimezone()
-        self.conn.execute(
-            """
-            UPDATE automation_commands
-            SET status = 'failed',
-                error_message = ?,
-                finished_at = ?,
-                expires_at = NULL,
-                updated_at = ?
-            WHERE id = ?
-            """,
-            (error[:1000], now.isoformat(), now.isoformat(), command_id),
-        )
-        self.conn.commit()
-        return self.get_automation_command(command_id)
-
-    def get_automation_command(self, command_id: int) -> dict[str, object] | None:
-        row = self.conn.execute(
-            "SELECT * FROM automation_commands WHERE id = ?",
-            (command_id,),
-        ).fetchone()
-        if row is None:
-            return None
-        return self._automation_command_from_row(row)
-
-    @staticmethod
-    def _automation_command_from_row(row) -> dict[str, object]:
-        payload = {}
-        result = None
-        try:
-            payload = json.loads(row["payload_json"] or "{}")
-        except json.JSONDecodeError:
-            payload = {}
-        if row["result_json"]:
-            try:
-                result = json.loads(row["result_json"])
-            except json.JSONDecodeError:
-                result = {"raw": row["result_json"]}
-        return {
-            "id": int(row["id"]),
-            "action": row["action"],
-            "payload": payload,
-            "status": row["status"],
-            "result": result,
-            "error_message": row["error_message"],
-            "request_chat_id": row["request_chat_id"],
-            "request_message_id": row["request_message_id"],
-            "claimed_by": row["claimed_by"],
-            "created_at": row["created_at"],
-            "claimed_at": row["claimed_at"],
-            "finished_at": row["finished_at"],
-            "expires_at": row["expires_at"],
-            "updated_at": row["updated_at"],
-        }
 
     def history_check_summary(self, limit: int = 20, now: datetime | None = None) -> dict[str, object]:
         now = now or datetime.now().astimezone()
@@ -1203,19 +916,6 @@ class Repository:
             WHERE status = 'pending'
               AND datetime(due_at) <= datetime(?)
             ORDER BY due_at, id
-            """,
-            (now.isoformat(),),
-        ).fetchall()
-        return [self._task_from_row(row) for row in rows]
-
-    def list_due_watching_reply_tasks(self, now: datetime) -> list[MonitorTask]:
-        rows = self.conn.execute(
-            """
-            SELECT * FROM monitor_tasks
-            WHERE status = 'watching'
-              AND task_type = 'reply'
-              AND datetime(started_at, '+5 minutes') <= datetime(?)
-            ORDER BY started_at, id
             """,
             (now.isoformat(),),
         ).fetchall()

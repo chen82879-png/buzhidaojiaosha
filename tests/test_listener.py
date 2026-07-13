@@ -13,7 +13,7 @@ def test_normalizes_telethon_message_with_reply():
         sender_id=10001,
         reply_to_msg_id=398700,
         chat=SimpleNamespace(title="test-chat", username=""),
-        sender=SimpleNamespace(username="customer_a", first_name="Customer", last_name="A"),
+        sender=SimpleNamespace(username="customer_a"),
     )
 
     normalized = normalize_telethon_message(message)
@@ -23,7 +23,6 @@ def test_normalizes_telethon_message_with_reply():
     assert normalized.message_id == 398744
     assert normalized.sender_user_id == 10001
     assert normalized.sender_username == "customer_a"
-    assert normalized.sender_display_name == "Customer A"
     assert normalized.text == "请稍等elk"
     assert normalized.reply_to_message_id == 398700
 

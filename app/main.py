@@ -2,7 +2,6 @@ import asyncio
 import contextlib
 import logging
 import os
-import secrets
 import time
 from datetime import datetime, timezone
 from math import ceil
@@ -10,8 +9,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
-from fastapi import Body, FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from redis import asyncio as redis_async
@@ -32,7 +31,6 @@ from app.worker import TimeoutWorker
 templates = Jinja2Templates(directory="app/templates")
 DISPLAY_TZ = ZoneInfo("Asia/Shanghai")
 logger = logging.getLogger(__name__)
-REPLY_RULE_CLEANUP_MARKER = "cleanup.reply_tasks_and_rule_keywords.v20260615"
 
 
 def build_repository(settings: Settings) -> Repository:
@@ -128,24 +126,6 @@ def summarize_status(repo, settings: Settings) -> dict[str, object]:
         "open_task_count": len(open_tasks),
         "keyword_count": len(keyword_configs),
     }
-
-
-def verify_automation_secret(settings: Settings, provided_secret: str) -> None:
-    expected_secret = getattr(settings, "automation_secret", "") or getattr(settings, "admin_password", "")
-    if not expected_secret or not secrets.compare_digest(str(provided_secret or ""), str(expected_secret)):
-        raise HTTPException(status_code=401, detail="invalid automation secret")
-
-
-def require_automation_repo(repo) -> None:
-    required = (
-        "create_automation_command",
-        "claim_next_automation_command",
-        "complete_automation_command",
-        "fail_automation_command",
-        "get_automation_command",
-    )
-    if not all(hasattr(repo, name) for name in required):
-        raise HTTPException(status_code=503, detail="automation queue unavailable")
 
 
 def build_mini_tasks(repo, now: datetime) -> list[dict[str, object]]:
@@ -289,31 +269,8 @@ def create_app(
         except Exception:
             logger.exception("telegram listener stopped unexpectedly")
 
-    async def run_startup_cleanup() -> None:
-        if not hasattr(repo, "clear_reply_tasks_and_legacy_rule_keywords_once"):
-            return
-        try:
-            result = repo.clear_reply_tasks_and_legacy_rule_keywords_once(REPLY_RULE_CLEANUP_MARKER)
-        except Exception:
-            logger.exception("startup cleanup failed")
-            return
-        reply_task_ids = result.get("reply_task_ids", [])
-        if reply_task_ids and hasattr(queue, "close_pending"):
-            for task_id in reply_task_ids:
-                try:
-                    await queue.close_pending(task_id)
-                except Exception:
-                    logger.exception("failed to clear pending queue item for task %s", task_id)
-        if not result.get("already_done"):
-            logger.info(
-                "startup cleanup cleared %s reply tasks and %s legacy rule keywords",
-                len(reply_task_ids),
-                result.get("legacy_rule_keywords_deleted", 0),
-            )
-
     @app.on_event("startup")
     async def start_timeout_worker() -> None:
-        await run_startup_cleanup()
         if app.state.timeout_worker_enabled:
             app.state.timeout_worker_task = asyncio.create_task(timeout_worker_loop())
         if app.state.listener_enabled:
@@ -462,92 +419,6 @@ def create_app(
     async def api_tasks_open():
         now = now_provider()
         return {"groups": build_mini_task_groups(repo, now)}
-
-    @app.post("/api/automation/commands")
-    async def api_create_automation_command(
-        payload: dict[str, object] | None = Body(default=None),
-        secret: str = Query(default=""),
-    ):
-        verify_automation_secret(settings, secret)
-        require_automation_repo(repo)
-        payload = payload or {}
-        action = str(payload.get("action") or "").strip()
-        if not action:
-            return JSONResponse({"ok": False, "error": "action is required"}, status_code=400)
-        request_message_id = payload.get("request_message_id")
-        if request_message_id not in (None, ""):
-            try:
-                request_message_id = int(request_message_id)
-            except (TypeError, ValueError):
-                return JSONResponse({"ok": False, "error": "request_message_id must be an integer"}, status_code=400)
-        command = repo.create_automation_command(
-            action=action,
-            payload=payload.get("payload") if isinstance(payload.get("payload"), dict) else {},
-            request_chat_id=str(payload.get("request_chat_id") or ""),
-            request_message_id=request_message_id,
-            now=now_provider(),
-        )
-        return {"ok": True, "command": command}
-
-    @app.get("/api/automation/poll")
-    async def api_poll_automation_command(
-        secret: str = Query(default=""),
-        worker_id: str = Query(default="browser-extension"),
-        wait_seconds: int = Query(default=20, ge=0, le=30),
-    ):
-        verify_automation_secret(settings, secret)
-        require_automation_repo(repo)
-        deadline = time.monotonic() + wait_seconds
-        while True:
-            command = repo.claim_next_automation_command(
-                worker_id=worker_id[:120],
-                now=now_provider(),
-                lease_seconds=120,
-            )
-            if command is not None:
-                return {"ok": True, "command": command}
-            if time.monotonic() >= deadline:
-                return {"ok": True, "command": None}
-            await asyncio.sleep(1)
-
-    @app.post("/api/automation/result")
-    async def api_finish_automation_command(
-        payload: dict[str, object] | None = Body(default=None),
-        secret: str = Query(default=""),
-    ):
-        verify_automation_secret(settings, secret)
-        require_automation_repo(repo)
-        payload = payload or {}
-        try:
-            command_id = int(payload.get("id") or 0)
-        except (TypeError, ValueError):
-            command_id = 0
-        if command_id <= 0:
-            return JSONResponse({"ok": False, "error": "id is required"}, status_code=400)
-        if payload.get("ok") is True:
-            command = repo.complete_automation_command(
-                command_id,
-                payload.get("result") if isinstance(payload.get("result"), dict) else {},
-                now=now_provider(),
-            )
-        else:
-            command = repo.fail_automation_command(
-                command_id,
-                str(payload.get("error") or "automation command failed"),
-                now=now_provider(),
-            )
-        if command is None:
-            return JSONResponse({"ok": False, "error": "command not found"}, status_code=404)
-        return {"ok": True, "command": command}
-
-    @app.get("/api/automation/commands/{command_id}")
-    async def api_get_automation_command(command_id: int, secret: str = Query(default="")):
-        verify_automation_secret(settings, secret)
-        require_automation_repo(repo)
-        command = repo.get_automation_command(command_id)
-        if command is None:
-            return JSONResponse({"ok": False, "error": "command not found"}, status_code=404)
-        return {"ok": True, "command": command}
 
     @app.get("/api/history/check")
     async def api_history_check():

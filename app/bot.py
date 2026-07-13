@@ -5,19 +5,12 @@ from app.fixed_keywords import FIXED_KEYWORDS
 from app.ignore_words import is_continuing_staff_reply_text, is_ignored_followup_text
 from app.matcher import match_enabled_keyword, match_message
 from app.models import MonitorTask, PendingMessage
-from app.special_accounts import (
-    SPECIAL_SELF_REPLY_ACCOUNT_NAMES,
-    is_self_reply_approval_text,
-    is_self_reply_processing_text,
-    is_special_self_reply_account,
-)
 from app.telegram_utils import build_message_url
 
 WAIT_TIMEOUT_MINUTES = 8
 FOLLOWUP_TIMEOUT_MINUTES = 15
 REPLY_TIMEOUT_MINUTES = 5
-REPLY_WATCH_MINUTES = 5
-SELF_REPLY_TIMEOUT_MINUTES = 10
+SELF_REPLY_TIMEOUT_MINUTES = 3
 
 
 @dataclass(frozen=True)
@@ -31,7 +24,6 @@ class NormalizedTelegramMessage:
     text: str
     message_time: datetime
     reply_to_message_id: int | None
-    sender_display_name: str = ""
 
 
 async def handle_incoming_message(
@@ -49,12 +41,6 @@ async def handle_incoming_message(
     configured_staff_ids = {
         chat_id for config in keyword_configs if config.enabled for chat_id in config.recipient_chat_ids
     }
-    configured_staff_ids.update(
-        staff.telegram_user_id
-        for rule in rules
-        for staff in rule.staff
-        if staff.enabled
-    )
     is_configured_staff = message.sender_user_id in configured_staff_ids
     if hasattr(repo, "upsert_message_snapshot"):
         repo.upsert_message_snapshot(
@@ -62,7 +48,6 @@ async def handle_incoming_message(
             message_id=message.message_id,
             sender_user_id=message.sender_user_id,
             sender_username=message.sender_username,
-            sender_display_name=message.sender_display_name,
             is_staff=is_configured_staff,
             text=message.text,
             message_time=message.message_time,
@@ -71,15 +56,6 @@ async def handle_incoming_message(
 
     if message.reply_to_message_id is not None:
         if is_configured_staff and hasattr(repo, "complete_tasks_referencing"):
-            keyword_config = match_enabled_keyword(message.text, keyword_configs)
-            if keyword_config is not None and hasattr(repo, "complete_watching_replies_referencing"):
-                completed_watching_tasks = repo.complete_watching_replies_referencing(
-                    message.chat_id,
-                    message.reply_to_message_id,
-                    message.message_time,
-                )
-                for task in completed_watching_tasks:
-                    await queue.close_pending(task.id)
             if (
                 is_continuing_staff_reply_text(message.text)
                 and hasattr(repo, "pending_task_for_context")
@@ -100,8 +76,7 @@ async def handle_incoming_message(
             for task in completed_tasks:
                 await queue.close_pending(task.id)
             if completed_tasks:
-                if keyword_config is None:
-                    return
+                return
         elif hasattr(repo, "latest_completed_wait_for_reference"):
             if is_ignored_followup_text(message.text):
                 return
@@ -112,24 +87,27 @@ async def handle_incoming_message(
 
     if not is_configured_staff:
         if message.reply_to_message_id is not None and hasattr(repo, "pending_task_for_context"):
-            if await _maybe_create_self_reply_from_approval(repo, queue, message):
-                return
             task = repo.pending_task_for_context(message.chat_id, message.reply_to_message_id)
             if task is not None and hasattr(repo, "add_task_context_message"):
                 repo.add_task_context_message(task.id, message.message_id)
                 return
-        if message.reply_to_message_id is not None:
-            if _is_special_processing_message(message):
+        if message.reply_to_message_id is not None and hasattr(repo, "get_message_snapshot"):
+            replied_snapshot = repo.get_message_snapshot(message.chat_id, message.reply_to_message_id)
+            if replied_snapshot is not None and replied_snapshot.is_staff and not is_ignored_followup_text(message.text):
+                await _create_reply_task(repo, queue, message, replied_snapshot)
                 return
         if (
             message.reply_to_message_id is None
+            and hasattr(repo, "latest_pending_task_for_customer")
             and not is_ignored_followup_text(message.text)
         ):
-            match = match_message(message.chat_id, message.text, rules)
-            if match is not None:
-                _record_keyword_hits(repo, message, match)
+            active_task = repo.latest_pending_task_for_customer(message.chat_id, message.sender_user_id)
+            if active_task is not None and active_task.task_type != "self_reply":
+                await _create_self_reply_task(repo, queue, message, active_task)
                 return
-            await _create_reply_task(repo, queue, message)
+        match = match_message(message.chat_id, message.text, rules)
+        if match is not None:
+            _record_keyword_hits(repo, message, match)
         return
 
     match = match_message(message.chat_id, message.text, rules)
@@ -202,11 +180,11 @@ async def _create_followup_task(repo, queue, message: NormalizedTelegramMessage,
     )
 
 
-async def _create_reply_task(repo, queue, message: NormalizedTelegramMessage) -> None:
+async def _create_reply_task(repo, queue, message: NormalizedTelegramMessage, replied_snapshot) -> None:
     if not hasattr(repo, "create_monitor_task"):
         return
-    recipient_chat_ids = _alert_recipient_ids(repo)
-    if not recipient_chat_ids:
+    config = _first_alert_config(repo)
+    if config is None:
         return
     url = build_message_url(message.chat_id, message.message_id, message.chat_username)
     task = repo.create_monitor_task(
@@ -214,84 +192,47 @@ async def _create_reply_task(repo, queue, message: NormalizedTelegramMessage) ->
         rule_id=_first_rule_id(repo, message.chat_id),
         chat_id=message.chat_id,
         chat_name=message.chat_name,
-        keyword="漏回",
+        keyword=config.keyword,
         staff_user_id=message.sender_user_id,
         staff_username=message.sender_username,
-        root_message_id=message.message_id,
-        wait_message_id=message.message_id,
+        root_message_id=message.reply_to_message_id or message.message_id,
+        wait_message_id=message.reply_to_message_id or message.message_id,
         trigger_message_id=message.message_id,
         message_excerpt=message.text[:200],
         message_url=url,
-        recipient_chat_ids=recipient_chat_ids,
+        recipient_chat_ids=config.recipient_chat_ids,
         started_at=message.message_time,
-        due_at=message.message_time + timedelta(minutes=REPLY_WATCH_MINUTES + REPLY_TIMEOUT_MINUTES),
-        status="watching",
+        due_at=message.message_time + timedelta(minutes=REPLY_TIMEOUT_MINUTES),
+    )
+    await queue.add_pending(
+        _pending_from_task(task, config.recipient_chat_ids),
+        due_at=message.message_time.timestamp() + REPLY_TIMEOUT_MINUTES * 60,
     )
 
 
-async def _create_self_reply_task(
-    repo,
-    queue,
-    message: NormalizedTelegramMessage,
-    root_message_id: int,
-    base_message_id: int,
-    recipient_chat_ids: list[int],
-) -> None:
+async def _create_self_reply_task(repo, queue, message: NormalizedTelegramMessage, base_task: MonitorTask) -> None:
     url = build_message_url(message.chat_id, message.message_id, message.chat_username)
     task = repo.create_monitor_task(
         task_type="self_reply",
-        rule_id=_first_rule_id(repo, message.chat_id),
+        rule_id=base_task.rule_id,
         chat_id=message.chat_id,
         chat_name=message.chat_name,
-        keyword="同意后处理",
+        keyword=base_task.keyword,
         staff_user_id=message.sender_user_id,
         staff_username=message.sender_username,
-        root_message_id=root_message_id,
-        wait_message_id=base_message_id,
+        root_message_id=base_task.root_message_id,
+        wait_message_id=base_task.wait_message_id,
         trigger_message_id=message.message_id,
         message_excerpt=message.text[:200],
         message_url=url,
-        recipient_chat_ids=recipient_chat_ids,
+        recipient_chat_ids=base_task.recipient_chat_ids,
         started_at=message.message_time,
         due_at=message.message_time + timedelta(minutes=SELF_REPLY_TIMEOUT_MINUTES),
     )
     await queue.add_pending(
-        _pending_from_task(task, recipient_chat_ids),
+        _pending_from_task(task, base_task.recipient_chat_ids),
         due_at=message.message_time.timestamp() + SELF_REPLY_TIMEOUT_MINUTES * 60,
     )
-
-
-async def _maybe_create_self_reply_from_approval(repo, queue, message: NormalizedTelegramMessage) -> bool:
-    if not is_self_reply_approval_text(message.text) or not hasattr(repo, "get_message_snapshot"):
-        return False
-    replied_snapshot = repo.get_message_snapshot(message.chat_id, message.reply_to_message_id)
-    if replied_snapshot is None:
-        return False
-    processing_snapshot = None
-    root_message_id = replied_snapshot.message_id
-    if _is_special_processing_snapshot(replied_snapshot):
-        processing_snapshot = replied_snapshot
-        root_message_id = replied_snapshot.reply_to_message_id or replied_snapshot.message_id
-    elif hasattr(repo, "latest_special_processing_reply_for_message"):
-        processing_snapshot = repo.latest_special_processing_reply_for_message(
-            message.chat_id,
-            replied_snapshot.message_id,
-            SPECIAL_SELF_REPLY_ACCOUNT_NAMES,
-        )
-    if processing_snapshot is None:
-        return False
-    recipient_chat_ids = _alert_recipient_ids(repo)
-    if not recipient_chat_ids:
-        return False
-    await _create_self_reply_task(
-        repo,
-        queue,
-        message,
-        root_message_id=root_message_id,
-        base_message_id=processing_snapshot.message_id,
-        recipient_chat_ids=recipient_chat_ids,
-    )
-    return True
 
 
 def _first_alert_config(repo):
@@ -301,32 +242,6 @@ def _first_alert_config(repo):
         if config.enabled and config.alert_enabled and config.recipient_chat_ids:
             return config
     return None
-
-
-def _alert_recipient_ids(repo) -> list[int]:
-    recipient_ids: list[int] = []
-    if not hasattr(repo, "list_keyword_configs"):
-        return recipient_ids
-    for config in repo.list_keyword_configs():
-        if not config.enabled or not config.alert_enabled:
-            continue
-        for chat_id in config.recipient_chat_ids:
-            if chat_id not in recipient_ids:
-                recipient_ids.append(chat_id)
-    return recipient_ids
-
-
-def _is_special_processing_message(message: NormalizedTelegramMessage) -> bool:
-    return is_special_self_reply_account(message.sender_username, message.sender_display_name) and (
-        is_self_reply_processing_text(message.text)
-    )
-
-
-def _is_special_processing_snapshot(snapshot) -> bool:
-    return is_special_self_reply_account(
-        snapshot.sender_username,
-        getattr(snapshot, "sender_display_name", ""),
-    ) and is_self_reply_processing_text(snapshot.text)
 
 
 def _first_rule_id(repo, chat_id: str) -> int:

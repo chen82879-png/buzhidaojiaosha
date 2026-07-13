@@ -96,7 +96,6 @@ def migrate(conn: sqlite3.Connection) -> None:
             message_id INTEGER NOT NULL,
             sender_user_id INTEGER NOT NULL,
             sender_username TEXT NOT NULL DEFAULT '',
-            sender_display_name TEXT NOT NULL DEFAULT '',
             is_staff INTEGER NOT NULL DEFAULT 0,
             text TEXT NOT NULL DEFAULT '',
             message_time TEXT NOT NULL,
@@ -134,30 +133,9 @@ def migrate(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (task_id, message_id)
         );
-        CREATE TABLE IF NOT EXISTS automation_commands (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            action TEXT NOT NULL,
-            payload_json TEXT NOT NULL DEFAULT '{}',
-            status TEXT NOT NULL DEFAULT 'pending',
-            result_json TEXT,
-            error_message TEXT NOT NULL DEFAULT '',
-            request_chat_id TEXT NOT NULL DEFAULT '',
-            request_message_id INTEGER,
-            claimed_by TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            claimed_at TEXT,
-            finished_at TEXT,
-            expires_at TEXT,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE INDEX IF NOT EXISTS idx_automation_commands_status_created
-            ON automation_commands(status, created_at);
         """
     )
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(keyword_configs)").fetchall()}
     if "alert_enabled" not in columns:
         conn.execute("ALTER TABLE keyword_configs ADD COLUMN alert_enabled INTEGER NOT NULL DEFAULT 1")
-    snapshot_columns = {row["name"] for row in conn.execute("PRAGMA table_info(message_snapshots)").fetchall()}
-    if "sender_display_name" not in snapshot_columns:
-        conn.execute("ALTER TABLE message_snapshots ADD COLUMN sender_display_name TEXT NOT NULL DEFAULT ''")
     conn.commit()
