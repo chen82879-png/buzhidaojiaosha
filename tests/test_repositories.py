@@ -4,6 +4,17 @@ from app.db import connect, migrate
 from app.models import KeywordConfig
 from app.repositories import Repository
 
+def test_migrate_creates_automation_commands_queue(tmp_path):
+    db_path = tmp_path / "app.sqlite3"
+    conn = connect(str(db_path))
+
+    migrate(conn)
+
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
+    indexes = {row["name"] for row in conn.execute("PRAGMA index_list(automation_commands)").fetchall()}
+    assert "automation_commands" in tables
+    assert "idx_automation_commands_status_created" in indexes
+
 
 def test_migrate_creates_rule_keyword_staff_and_hit_records(tmp_path):
     db_path = tmp_path / "app.sqlite3"

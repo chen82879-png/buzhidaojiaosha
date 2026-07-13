@@ -14,6 +14,7 @@ class Settings:
     telegram_api_hash: str
     listener_phone: str
     telethon_session_path: str
+    automation_secret: str = ""
 
 
 def load_settings() -> Settings:
@@ -28,6 +29,7 @@ def load_settings() -> Settings:
         telegram_api_hash=os.getenv("TELEGRAM_API_HASH", ""),
         listener_phone=os.getenv("LISTENER_PHONE", ""),
         telethon_session_path=os.getenv("TELETHON_SESSION_PATH", "./data/listener.session"),
+        automation_secret=os.getenv("AUTOMATION_SECRET", os.getenv("ADMIN_PASSWORD", "change-me")),
     )
 
 
