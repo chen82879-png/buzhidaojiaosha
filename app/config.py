@@ -19,6 +19,7 @@ class Settings:
     ignore_keywords: tuple[str, ...] = ()
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash"
+    automation_secret: str = ""
 
 
 def _split_values(raw: str, separators: tuple[str, ...] = (",", "|")) -> tuple[str, ...]:
@@ -46,6 +47,7 @@ def load_settings() -> Settings:
         ignore_keywords=_split_values(os.getenv("IGNORE_KEYWORDS", ""), (",",)),
         gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash"),
+        automation_secret=os.getenv("AUTOMATION_SECRET", os.getenv("ADMIN_PASSWORD", "change-me")),
     )
 
 

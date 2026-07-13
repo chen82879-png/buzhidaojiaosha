@@ -996,6 +996,171 @@ class Repository:
             self.conn.commit()
         return task_ids
 
+    def create_automation_command(
+        self,
+        action: str,
+        payload: dict[str, object] | None = None,
+        request_chat_id: str = "",
+        request_message_id: int | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, object]:
+        now = now or datetime.now().astimezone()
+        cur = self.conn.execute(
+            """
+            INSERT INTO automation_commands(
+                action, payload_json, status, request_chat_id, request_message_id,
+                created_at, updated_at
+            ) VALUES (?, ?, 'pending', ?, ?, ?, ?)
+            """,
+            (
+                action.strip(),
+                json.dumps(payload or {}, ensure_ascii=False),
+                request_chat_id,
+                request_message_id,
+                now.isoformat(),
+                now.isoformat(),
+            ),
+        )
+        self.conn.commit()
+        return self.get_automation_command(int(cur.lastrowid))
+
+    def claim_next_automation_command(
+        self,
+        worker_id: str,
+        now: datetime | None = None,
+        lease_seconds: int = 120,
+    ) -> dict[str, object] | None:
+        now = now or datetime.now().astimezone()
+        expires_at = now + timedelta(seconds=lease_seconds)
+        self.conn.execute(
+            """
+            UPDATE automation_commands
+            SET status = 'pending',
+                claimed_by = '',
+                claimed_at = NULL,
+                expires_at = NULL,
+                updated_at = ?
+            WHERE status = 'running'
+              AND expires_at IS NOT NULL
+              AND datetime(expires_at) < datetime(?)
+            """,
+            (now.isoformat(), now.isoformat()),
+        )
+        row = self.conn.execute(
+            """
+            SELECT id
+            FROM automation_commands
+            WHERE status = 'pending'
+            ORDER BY datetime(created_at), id
+            LIMIT 1
+            """
+        ).fetchone()
+        if row is None:
+            self.conn.commit()
+            return None
+        command_id = int(row["id"])
+        cur = self.conn.execute(
+            """
+            UPDATE automation_commands
+            SET status = 'running',
+                claimed_by = ?,
+                claimed_at = ?,
+                expires_at = ?,
+                updated_at = ?
+            WHERE id = ?
+              AND status = 'pending'
+            """,
+            (worker_id, now.isoformat(), expires_at.isoformat(), now.isoformat(), command_id),
+        )
+        self.conn.commit()
+        if cur.rowcount != 1:
+            return None
+        return self.get_automation_command(command_id)
+
+    def complete_automation_command(
+        self,
+        command_id: int,
+        result: dict[str, object] | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, object] | None:
+        now = now or datetime.now().astimezone()
+        self.conn.execute(
+            """
+            UPDATE automation_commands
+            SET status = 'succeeded',
+                result_json = ?,
+                error_message = '',
+                finished_at = ?,
+                expires_at = NULL,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (json.dumps(result or {}, ensure_ascii=False), now.isoformat(), now.isoformat(), command_id),
+        )
+        self.conn.commit()
+        return self.get_automation_command(command_id)
+
+    def fail_automation_command(
+        self,
+        command_id: int,
+        error: str,
+        now: datetime | None = None,
+    ) -> dict[str, object] | None:
+        now = now or datetime.now().astimezone()
+        self.conn.execute(
+            """
+            UPDATE automation_commands
+            SET status = 'failed',
+                error_message = ?,
+                finished_at = ?,
+                expires_at = NULL,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (error[:1000], now.isoformat(), now.isoformat(), command_id),
+        )
+        self.conn.commit()
+        return self.get_automation_command(command_id)
+
+    def get_automation_command(self, command_id: int) -> dict[str, object] | None:
+        row = self.conn.execute(
+            "SELECT * FROM automation_commands WHERE id = ?",
+            (command_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._automation_command_from_row(row)
+
+    @staticmethod
+    def _automation_command_from_row(row) -> dict[str, object]:
+        payload = {}
+        result = None
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+        if row["result_json"]:
+            try:
+                result = json.loads(row["result_json"])
+            except json.JSONDecodeError:
+                result = {"raw": row["result_json"]}
+        return {
+            "id": int(row["id"]),
+            "action": row["action"],
+            "payload": payload,
+            "status": row["status"],
+            "result": result,
+            "error_message": row["error_message"],
+            "request_chat_id": row["request_chat_id"],
+            "request_message_id": row["request_message_id"],
+            "claimed_by": row["claimed_by"],
+            "created_at": row["created_at"],
+            "claimed_at": row["claimed_at"],
+            "finished_at": row["finished_at"],
+            "expires_at": row["expires_at"],
+            "updated_at": row["updated_at"],
+        }
+
     def history_check_summary(self, limit: int = 20, now: datetime | None = None) -> dict[str, object]:
         now = now or datetime.now().astimezone()
         local_now = now.astimezone(DISPLAY_TZ) if now.tzinfo else now.replace(tzinfo=DISPLAY_TZ)

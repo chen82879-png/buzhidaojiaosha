@@ -143,6 +143,24 @@ def migrate(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_monitor_tasks_deleted_wait_lookup
             ON monitor_tasks(chat_id, wait_message_id, task_type, status);
+        CREATE TABLE IF NOT EXISTS automation_commands (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action TEXT NOT NULL,
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'pending',
+            result_json TEXT,
+            error_message TEXT NOT NULL DEFAULT '',
+            request_chat_id TEXT NOT NULL DEFAULT '',
+            request_message_id INTEGER,
+            claimed_by TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            claimed_at TEXT,
+            finished_at TEXT,
+            expires_at TEXT,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_automation_commands_status_created
+            ON automation_commands(status, created_at);
         """
     )
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(keyword_configs)").fetchall()}
